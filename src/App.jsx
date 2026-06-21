@@ -2331,10 +2331,21 @@ async function registrarContratista({ codigo, cuit, razonSocial, email, password
   const signupData = await signupRes.json();
   if (!signupRes.ok) throw new Error(signupData.error_description || signupData.msg || "No se pudo crear tu usuario.");
   const userId = signupData.user?.id || signupData.id;
-  const accessToken = signupData.access_token; // disponible si el proyecto no exige confirmación por mail
   if (!userId) throw new Error("No se pudo obtener el ID del usuario creado.");
 
-  const authHeader = accessToken ? `Bearer ${accessToken}` : `Bearer ${SUPABASE_ANON_KEY}`;
+  // 2b. nos logueamos explícitamente para tener un token real de ESTE usuario
+  //     (el signup no siempre devuelve la sesión activa)
+  let accessToken = signupData.access_token;
+  if (!accessToken) {
+    const loginData = await loginConEmailYPassword(email, password);
+    accessToken = loginData.access_token;
+  }
+  if (!accessToken) {
+    throw new Error(
+      "Tu usuario se creó, pero no pudimos iniciar tu sesión automáticamente. Probá ingresar con 'Ya tengo cuenta'."
+    );
+  }
+  const authHeader = `Bearer ${accessToken}`;
 
   // 3. crear la fila de contratista, vinculada a esa empresa
   const contratistaRes = await fetch(`${SUPABASE_URL}/rest/v1/contratistas`, {
