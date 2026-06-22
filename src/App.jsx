@@ -85,71 +85,14 @@ const NAV_BY_ROLE = {
   ],
 };
 
-const EMPRESAS_CLIENTE = [
-  { id: "EMP-7K2X9", razonSocial: "Minera del Sur S.A.", cuit: "30-71234567-8", rubro: "Minería", contratistas: 12, estado: "activa", plan: "Profesional" },
-  { id: "EMP-3R8L1", razonSocial: "Frigorífico San Jorge SRL", cuit: "30-69874512-3", rubro: "Alimenticia", contratistas: 5, estado: "activa", plan: "Básico" },
-  { id: "EMP-9T4P6", razonSocial: "Petrocamp Argentina S.A.", cuit: "30-70123456-1", rubro: "Petrolera", contratistas: 19, estado: "activa", plan: "Enterprise" },
-  { id: "EMP-2D5N0", razonSocial: "Transportes Cuyo SRL", cuit: "30-68512349-7", rubro: "Logística", contratistas: 3, estado: "suspendida", plan: "Básico" },
-];
+const EMPRESAS_CLIENTE = [];
 
-const PLANES = [
-  { id: "basico", nombre: "Básico", min: 1, max: 15, mensual: 49 },
-  { id: "profesional", nombre: "Profesional", min: 16, max: 30, mensual: 89 },
-  { id: "avanzado", nombre: "Avanzado", min: 31, max: 50, mensual: 149 },
-  { id: "enterprise", nombre: "Enterprise", min: 51, max: Infinity, mensual: 249 },
-];
+const CONTRACTORS = [];
 
-function planPorContratistas(n) {
-  return PLANES.find((p) => n >= p.min && n <= p.max) || PLANES[PLANES.length - 1];
-}
+const DOCS_CONTRATISTA = [];
 
-function precioPorCiclo(mensual, ciclo) {
-  if (ciclo === "mensual") return { total: mensual, label: "/ mes" };
-  if (ciclo === "semestral") return { total: Math.round(mensual * 6), label: "/ 6 meses" };
-  return { total: Math.round(mensual * 12), label: "/ año" };
-}
+const APPROVALS_GROUPED = [];
 
-const STATUS_EMPRESA = {
-  activa: { label: "Activa", color: "#3F8F5F", bg: "#EAF4ED" },
-  suspendida: { label: "Suspendida", color: "#C9483B", bg: "#FBEAE8" },
-};
-
-const CONTRACTORS = [
-  {
-    id: "C-014", empresa: "Andesmin Servicios SRL", rubro: "Minería", trabajadores: 18, estado: "vigente", vencen: 2,
-    emergencia: { art: "Galeno ART", telArt: "0800-333-0303", seguro: "La Caja Seguros", telSeguro: "0800-444-2522", contacto: "J. Medina (Resp. HSE) — 341-455-1212" },
-  },
-  {
-    id: "C-022", empresa: "Logitrans Patagonia", rubro: "Logística", trabajadores: 9, estado: "por_vencer", vencen: 5,
-    emergencia: { art: "Prevención ART", telArt: "0800-122-3340", seguro: "Sancor Seguros", telSeguro: "0800-666-7400", contacto: "M. Paz (Resp. HSE) — 341-455-3434" },
-  },
-  {
-    id: "C-031", empresa: "Petrocamp Ingeniería", rubro: "Petrolera", trabajadores: 27, estado: "vencido", vencen: 0,
-    emergencia: { art: "Experta ART", telArt: "0800-122-3380", seguro: "Zurich Argentina", telSeguro: "0800-345-2000", contacto: "R. Ibáñez (Resp. HSE) — 341-455-5656" },
-  },
-  {
-    id: "C-040", empresa: "Friolar Alimentos", rubro: "Alimenticia", trabajadores: 6, estado: "vigente", vencen: 1,
-    emergencia: { art: "Asociart ART", telArt: "0800-333-2727", seguro: "Mapfre Argentina", telSeguro: "0800-666-1414", contacto: "S. Coria (Resp. HSE) — 341-455-7878" },
-  },
-  {
-    id: "C-053", empresa: "ServiIndustrial Norte", rubro: "Industrial", trabajadores: 14, estado: "por_vencer", vencen: 3,
-    emergencia: { art: "Galeno ART", telArt: "0800-333-0303", seguro: "La Segunda Seguros", telSeguro: "0800-222-5050", contacto: "D. López (Resp. HSE) — 341-455-9090" },
-  },
-  {
-    id: "C-061", empresa: "MineralSur Contratos", rubro: "Minería", trabajadores: 31, estado: "vencido", vencen: 0,
-    emergencia: { art: "Experta ART", telArt: "0800-122-3380", seguro: "Federación Patronal", telSeguro: "0800-333-8000", contacto: "N. Vega (Resp. HSE) — 341-455-2323" },
-  },
-];
-
-const DOCS_CONTRATISTA = [
-  { id: "D-1", nombre: "ART vigente", estado: "vigente", vence: "18 Ago 2026" },
-  { id: "D-2", nombre: "Seguro de responsabilidad civil", estado: "por_vencer", vence: "27 Jun 2026" },
-  { id: "D-3", nombre: "Constancia CUIT", estado: "vigente", vence: "—" },
-  { id: "D-4", nombre: "Curso de seguridad HSE", estado: "vencido", vence: "02 Jun 2026" },
-  { id: "D-5", nombre: "Apto médico", estado: "vigente", vence: "11 Sep 2026" },
-];
-
-const APPROVALS_GROUPED = [
   {
     contratista: "Petrocamp Ingeniería",
     items: [
@@ -455,73 +398,9 @@ const DOCS_INDIVIDUALES_BASE = [
   "Entrega de EPP (Res. SRT 299/11)",
 ];
 
-const TRABAJADORES = [
-  {
-    id: "T-01",
-    nombre: "Roberto Funes",
-    dni: "30.412.876",
-    contratista: "Andesmin Servicios SRL",
-    documentos: [
-      { nombre: "DNI con foto", tipo: "sin_vencimiento", cargado: true },
-      { nombre: "Apto médico", tipo: "vencimiento", fechaVencimiento: new Date(2026, 8, 11) },
-      { nombre: "Seguro de vida obligatorio (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 11, 1) },
-      { nombre: "ART (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 7, 15) },
-      { nombre: "Constancia de capacitación general", tipo: "antiguedad6m", fechaEmision: new Date(2026, 2, 1) },
-      { nombre: "Constancia de capacitación específica de la tarea", tipo: "antiguedad6m", fechaEmision: new Date(2026, 1, 15) },
-      { nombre: "Entrega de EPP (Res. SRT 299/11)", tipo: "antiguedad6m", fechaEmision: new Date(2026, 0, 10) },
-    ],
-  },
-  {
-    id: "T-02",
-    nombre: "Pedro \"Pedrito\" Acosta",
-    dni: "33.987.214",
-    contratista: "Andesmin Servicios SRL",
-    documentos: [
-      { nombre: "DNI con foto", tipo: "sin_vencimiento", cargado: true },
-      { nombre: "Apto médico", tipo: "vencimiento", fechaVencimiento: null },
-      { nombre: "Seguro de vida obligatorio (nominado)", tipo: "vencimiento", fechaVencimiento: null },
-      // ejemplo del caso planteado: vence "mañana" (21 jun) pero la próxima fecha de trabajo es el lunes 22 -> vencido
-      { nombre: "ART (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 5, 21) },
-      { nombre: "Constancia de capacitación general", tipo: "antiguedad6m", fechaEmision: new Date(2025, 10, 1) },
-      { nombre: "Constancia de capacitación específica de la tarea", tipo: "antiguedad6m", fechaEmision: new Date(2026, 3, 1) },
-      { nombre: "Entrega de EPP (Res. SRT 299/11)", tipo: "antiguedad6m", fechaEmision: new Date(2026, 3, 5) },
-    ],
-  },
-  {
-    id: "T-03",
-    nombre: "Marcos Bravo",
-    dni: "29.105.643",
-    contratista: "ServiIndustrial Norte",
-    documentos: [
-      { nombre: "DNI con foto", tipo: "sin_vencimiento", cargado: true },
-      { nombre: "Apto médico", tipo: "vencimiento", fechaVencimiento: new Date(2026, 9, 2) },
-      { nombre: "Seguro de vida obligatorio (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 10, 5) },
-      { nombre: "ART (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 5, 15) },
-      { nombre: "Constancia de capacitación general", tipo: "antiguedad6m", fechaEmision: new Date(2026, 2, 20) },
-      { nombre: "Constancia de capacitación específica de la tarea", tipo: "antiguedad6m", fechaEmision: new Date(2026, 2, 20) },
-      { nombre: "Entrega de EPP (Res. SRT 299/11)", tipo: "antiguedad6m", fechaEmision: new Date(2026, 2, 20) },
-    ],
-  },
-  {
-    id: "T-04",
-    nombre: "Lucía Acosta",
-    dni: "31.220.998",
-    contratista: "Petrocamp Ingeniería",
-    documentos: [
-      { nombre: "DNI con foto", tipo: "sin_vencimiento", cargado: true },
-      // próximo a vencer: vence el 28 jun, a 6 días de la fecha de referencia (22 jun)
-      { nombre: "Apto médico", tipo: "vencimiento", fechaVencimiento: new Date(2026, 5, 28) },
-      { nombre: "Seguro de vida obligatorio (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 9, 1) },
-      { nombre: "ART (nominado)", tipo: "vencimiento", fechaVencimiento: new Date(2026, 8, 1) },
-      { nombre: "Constancia de capacitación general", tipo: "antiguedad6m", fechaEmision: new Date(2026, 1, 1) },
-      { nombre: "Constancia de capacitación específica de la tarea", tipo: "antiguedad6m", fechaEmision: new Date(2026, 1, 1) },
-      { nombre: "Entrega de EPP (Res. SRT 299/11)", tipo: "antiguedad6m", fechaEmision: new Date(2026, 1, 1) },
-    ],
-  },
-];
+const TRABAJADORES = [];
 
-// contratista "logueado" de ejemplo en este demo (en real vendría de la sesión)
-const CONTRATISTA_LOGUEADO = "Andesmin Servicios SRL";
+const CONTRATISTA_LOGUEADO = "";
 
 function trabajadorHabilitado(t) {
   return t.documentos.every((d) => getEstadoDocumento(d) === "vigente");
