@@ -2305,7 +2305,7 @@ async function loginSuperAdmin(email, password) {
   if (!res.ok) throw new Error(data.error_description || data.msg || "No se pudo iniciar sesión");
 
   // traemos el perfil para confirmar que el rol sea super_admin
-  const perfilRes = await fetch(`${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=rol,nombre`, {
+  const perfilRes = await fetch(`${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=id,rol,nombre`, {
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${data.access_token}` },
   });
   const perfiles = await perfilRes.json();
@@ -2546,7 +2546,7 @@ async function loginEmpresa(cuitIngresado, password) {
   const data = await loginConEmailYPassword(empresas[0].email, password);
 
   const perfilRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=rol,nombre,empresa_cliente_id`,
+    `${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=id,rol,nombre,empresa_cliente_id`,
     { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${data.access_token}` } }
   );
   const perfiles = await perfilRes.json();
@@ -2568,7 +2568,7 @@ async function loginContratista(cuitIngresado, password) {
   const data = await loginConEmailYPassword(contratistas[0].email, password);
 
   const perfilRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=rol,nombre,contratista_id`,
+    `${SUPABASE_URL}/rest/v1/perfiles?id=eq.${data.user.id}&select=id,rol,nombre,contratista_id`,
     { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${data.access_token}` } }
   );
   const perfiles = await perfilRes.json();
