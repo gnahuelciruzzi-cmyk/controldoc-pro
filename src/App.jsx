@@ -1766,15 +1766,30 @@ const IA_META = {
 
 const FORMATO_ICON = { pdf: FileText, imagen: FileImage, excel: FileSpreadsheet };
 
-function AprobacionesView() {
-  const [grupos, setGrupos] = useState(APPROVALS_GROUPED);
+function AprobacionesView({ session }) {
+  const modoReal = !!(session?.accessToken && session?.perfil?.empresa_cliente_id);
+  const [grupos, setGrupos] = useState(modoReal ? [] : APPROVALS_GROUPED);
+  const [cargando, setCargando] = useState(false);
+  const [errorCarga, setErrorCarga] = useState("");
   const [motivoFor, setMotivoFor] = useState(null); // id del item en rechazo
   const [motivoTexto, setMotivoTexto] = useState("");
+  const [verError, setVerError] = useState("");
+  const [refrescar, setRefrescar] = useState(0);
+
+  React.useEffect(() => {
+    if (!modoReal) return;
+    setCargando(true);
+    setErrorCarga("");
+    obtenerPendientesDeAprobacion({ accessToken: session.accessToken, empresaClienteId: session.perfil.empresa_cliente_id })
+      .then(setGrupos)
+      .catch((e) => setErrorCarga(e.message))
+      .finally(() => setCargando(false));
+  }, [modoReal, session?.accessToken, session?.perfil?.empresa_cliente_id, refrescar]);
 
   const todosItems = grupos.flatMap((g) => g.items.map((it) => ({ ...it, contratista: g.contratista })));
-  const okCount = todosItems.filter((it) => analisisIA(it).confianza === "ok").length;
+  const okCount = modoReal ? 0 : todosItems.filter((it) => analisisIA(it).confianza === "ok").length;
 
-  const aprobarItem = (contratista, id) => {
+  const quitarDeLista = (contratista, id) => {
     setGrupos((prev) =>
       prev
         .map((g) => (g.contratista === contratista ? { ...g, items: g.items.filter((i) => i.id !== id) } : g))
@@ -1782,13 +1797,53 @@ function AprobacionesView() {
     );
   };
 
-  const rechazarItem = (contratista, id) => {
-    aprobarItem(contratista, id); // se quita de pendientes; en real, vuelve al contratista marcado como rechazado
+  const aprobarItem = async (contratista, id) => {
+    if (modoReal) {
+      try {
+        await resolverDocumento({ accessToken: session.accessToken, docId: id, aprobado: true, revisadoPor: session.perfil.id });
+        quitarDeLista(contratista, id);
+      } catch (e) {
+        setErrorCarga(e.message);
+      }
+      return;
+    }
+    quitarDeLista(contratista, id);
+  };
+
+  const rechazarItem = async (contratista, id) => {
+    if (modoReal) {
+      try {
+        await resolverDocumento({
+          accessToken: session.accessToken,
+          docId: id,
+          aprobado: false,
+          motivoRechazo: motivoTexto,
+          revisadoPor: session.perfil.id,
+        });
+        quitarDeLista(contratista, id);
+      } catch (e) {
+        setErrorCarga(e.message);
+      }
+    } else {
+      quitarDeLista(contratista, id);
+    }
     setMotivoFor(null);
     setMotivoTexto("");
   };
 
-  const aprobarTodo = (contratista) => {
+  const aprobarTodo = async (contratista) => {
+    const grupo = grupos.find((g) => g.contratista === contratista);
+    if (modoReal && grupo) {
+      try {
+        await Promise.all(
+          grupo.items.map((it) =>
+            resolverDocumento({ accessToken: session.accessToken, docId: it.id, aprobado: true, revisadoPor: session.perfil.id })
+          )
+        );
+      } catch (e) {
+        setErrorCarga(e.message);
+      }
+    }
     setGrupos((prev) => prev.filter((g) => g.contratista !== contratista));
   };
 
@@ -1800,9 +1855,32 @@ function AprobacionesView() {
     );
   };
 
+  const verArchivo = async (rutaArchivo) => {
+    setVerError("");
+    if (!rutaArchivo) return;
+    try {
+      const url = await obtenerUrlDescarga({ accessToken: session.accessToken, rutaArchivo });
+      window.open(url, "_blank");
+    } catch (e) {
+      setVerError(e.message);
+    }
+  };
+
   return (
     <div className="px-8 pb-10">
-      {grupos.length === 0 && (
+      {cargando && <p className="text-[12px] mb-4" style={{ color: "#9CA39A" }}>Cargando documentos pendientes...</p>}
+      {errorCarga && (
+        <div className="rounded-lg px-3.5 py-2.5 mb-4 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+          {errorCarga}
+        </div>
+      )}
+      {verError && (
+        <div className="rounded-lg px-3.5 py-2.5 mb-4 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+          {verError}
+        </div>
+      )}
+
+      {grupos.length === 0 && !cargando && (
         <div
           className="rounded-xl border bg-white p-8 text-center text-[13px]"
           style={{ borderColor: "#E2E5E1", color: "#9CA39A" }}
@@ -1811,7 +1889,7 @@ function AprobacionesView() {
         </div>
       )}
 
-      {grupos.length > 0 && (
+      {!modoReal && grupos.length > 0 && (
         <div
           className="rounded-xl border p-4 mb-5 flex items-center justify-between gap-3 flex-wrap"
           style={{ borderColor: "#DCE7EB", background: "#EAF1F4" }}
@@ -1857,9 +1935,10 @@ function AprobacionesView() {
 
             <div className="flex flex-col">
               {g.items.map((it) => {
-                const FileIcon = FORMATO_ICON[it.formato] || FileText;
-                const { confianza, fechaLabel } = analisisIA(it);
-                const ia = IA_META[confianza];
+                const esReal = modoReal;
+                const FileIcon = esReal ? (FORMATO_ICON[it.formato] || FileText) : (FORMATO_ICON[it.formato] || FileText);
+                const ia = esReal ? null : IA_META[analisisIA(it).confianza];
+                const fechaLabel = esReal ? null : analisisIA(it).fechaLabel;
                 return (
                   <div key={it.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
                     <div className="px-5 py-3.5 flex items-start justify-between gap-3">
@@ -1867,15 +1946,21 @@ function AprobacionesView() {
                         <FileIcon size={17} color="#6B7268" className="mt-0.5 shrink-0" />
                         <div>
                           <div className="text-[13px] font-medium" style={{ color: "#14181C" }}>
-                            {it.doc} — <span style={{ color: "#6B7268" }}>{it.sujeto}</span>
+                            {esReal ? it.nombre_documento : it.doc} —{" "}
+                            <span style={{ color: "#6B7268" }}>{esReal ? "Empresa" : it.sujeto}</span>
                           </div>
                           <div className="text-[11.5px] mt-0.5" style={{ color: "#9CA39A" }}>
-                            {it.archivo} · subido {it.subido}
+                            {esReal
+                              ? `${it.formato || "archivo"} · subido ${fmtFecha(new Date(it.created_at))}${
+                                  it.fecha_vencimiento ? ` · vence ${fmtFecha(new Date(it.fecha_vencimiento + "T00:00:00"))}` : ""
+                                }`
+                              : `${it.archivo} · subido ${it.subido}`}
                           </div>
                         </div>
                       </div>
                       <div className="flex gap-2 shrink-0">
                         <button
+                          onClick={() => esReal && verArchivo(it.archivo_path)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium"
                           style={{ background: "#F7F8F6", color: "#2C5F7C", border: "1px solid #E2E5E1" }}
                         >
@@ -1898,32 +1983,31 @@ function AprobacionesView() {
                       </div>
                     </div>
 
-                    <div className="px-5 pb-4 pl-[44px]">
-                      <div
-                        className="rounded-lg px-3.5 py-3 flex items-start gap-2.5"
-                        style={{ background: ia.bg }}
-                      >
-                        <Sparkles size={14} color={ia.color} className="mt-0.5 shrink-0" />
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11.5px] font-semibold" style={{ color: ia.color }}>
-                              {ia.label}
-                            </span>
-                            {!it.ia.legible && (
-                              <span className="text-[11px] font-medium" style={{ color: "#8A2E25" }}>
-                                · documento poco legible
+                    {!esReal && (
+                      <div className="px-5 pb-4 pl-[44px]">
+                        <div className="rounded-lg px-3.5 py-3 flex items-start gap-2.5" style={{ background: ia.bg }}>
+                          <Sparkles size={14} color={ia.color} className="mt-0.5 shrink-0" />
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[11.5px] font-semibold" style={{ color: ia.color }}>
+                                {ia.label}
                               </span>
-                            )}
-                          </div>
-                          <div className="text-[12px] mt-0.5" style={{ color: "#14181C" }}>
-                            Detectado: {it.ia.tipoDetectado} — {fechaLabel}
-                          </div>
-                          <div className="text-[11.5px] mt-0.5" style={{ color: "#4B524A" }}>
-                            {it.ia.observacion}
+                              {!it.ia.legible && (
+                                <span className="text-[11px] font-medium" style={{ color: "#8A2E25" }}>
+                                  · documento poco legible
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[12px] mt-0.5" style={{ color: "#14181C" }}>
+                              Detectado: {it.ia.tipoDetectado} — {fechaLabel}
+                            </div>
+                            <div className="text-[11.5px] mt-0.5" style={{ color: "#4B524A" }}>
+                              {it.ia.observacion}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     {motivoFor === it.id && (
                       <div className="px-5 pb-4 flex gap-2">
@@ -2308,6 +2392,62 @@ async function obtenerUrlDescarga({ accessToken, rutaArchivo }) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || "No se pudo generar el link de descarga.");
   return `${SUPABASE_URL}/storage/v1${data.signedURL}`;
+}
+
+/* ---------- Aprobaciones reales (Empresa / Auditor) ---------- */
+
+// trae los documentos pendientes de revisión de TODOS los contratistas de esta empresa
+async function obtenerPendientesDeAprobacion({ accessToken, empresaClienteId }) {
+  // 1. contratistas de esta empresa
+  const contratistasRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/contratistas?empresa_cliente_id=eq.${empresaClienteId}&select=id,razon_social`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` } }
+  );
+  const contratistas = await contratistasRes.json();
+  if (!contratistasRes.ok) throw new Error("No se pudieron traer tus contratistas.");
+  if (!contratistas.length) return [];
+
+  const idsContratistas = contratistas.map((c) => c.id);
+  const nombrePorId = Object.fromEntries(contratistas.map((c) => [c.id, c.razon_social]));
+
+  // 2. documentos pendientes que pertenezcan a esos contratistas
+  const idsFiltro = idsContratistas.join(",");
+  const docsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/documentos?entidad_tipo=eq.contratista&entidad_id=in.(${idsFiltro})&estado_revision=eq.pendiente&order=created_at.desc`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` } }
+  );
+  const docs = await docsRes.json();
+  if (!docsRes.ok) throw new Error("No se pudieron traer los documentos pendientes.");
+
+  // 3. agrupar por contratista, como espera la pantalla
+  const grupos = {};
+  docs.forEach((d) => {
+    const nombre = nombrePorId[d.entidad_id] || "Contratista";
+    if (!grupos[nombre]) grupos[nombre] = [];
+    grupos[nombre].push(d);
+  });
+  return Object.entries(grupos).map(([contratista, items]) => ({ contratista, items }));
+}
+
+async function resolverDocumento({ accessToken, docId, aprobado, motivoRechazo, revisadoPor }) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/documentos?id=eq.${docId}`, {
+    method: "PATCH",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify({
+      estado_revision: aprobado ? "aprobado" : "rechazado",
+      motivo_rechazo: aprobado ? null : motivoRechazo || "Sin motivo especificado",
+      revisado_por: revisadoPor,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || "No se pudo actualizar el documento.");
+  }
 }
 
 async function registrarContratista({ codigo, cuit, razonSocial, email, password }) {
@@ -3026,7 +3166,7 @@ export default function App() {
         {view === "vehiculos" && <VehiculosView />}
         {view === "trabajadores" && <TrabajadoresView role={role} />}
         {view === "reportes" && <ReportesView />}
-        {view === "aprobaciones" && <AprobacionesView />}
+        {view === "aprobaciones" && <AprobacionesView session={session} />}
         {view === "accesos" && <AccesosView />}
       </main>
     </div>
