@@ -498,26 +498,35 @@ function Topbar({ title, subtitle }) {
   );
 }
 
-function SuperAdminDashboardView() {
-  const totalEmpresas = EMPRESAS_CLIENTE.length;
-  const activas = EMPRESAS_CLIENTE.filter((e) => e.estado === "activa").length;
-  const totalContratistas = EMPRESAS_CLIENTE.reduce((a, e) => a + e.contratistas, 0);
-  const facturacionMensual = EMPRESAS_CLIENTE.reduce(
-    (a, e) => a + planPorContratistas(e.contratistas).mensual,
-    0
-  );
+function SuperAdminDashboardView({ session }) {
+  const [empresas, setEmpresas] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+
+  React.useEffect(() => {
+    if (!session?.accessToken) return;
+    setCargando(true);
+    obtenerEmpresasCliente({ accessToken: session.accessToken })
+      .then(setEmpresas)
+      .catch((e) => setError(e.message))
+      .finally(() => setCargando(false));
+  }, [session?.accessToken]);
+
+  const activas = empresas.filter((e) => e.estado === "activa").length;
+  const suspendidas = empresas.filter((e) => e.estado === "suspendida").length;
 
   return (
     <div className="px-8 pb-10">
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Empresas clientes" value={totalEmpresas} sub={`${activas} activas`} />
-        <KpiCard label="Contratistas en la plataforma" value={totalContratistas} sub="entre todas las empresas" />
-        <KpiCard label="Facturación mensual estimada" value={`$${facturacionMensual}`} sub="según plan de cada empresa" accent="#3F8F5F" />
-        <KpiCard
-          label="Empresas suspendidas"
-          value={EMPRESAS_CLIENTE.filter((e) => e.estado === "suspendida").length}
-          accent="#C9483B"
-        />
+      {error && (
+        <div className="rounded-lg px-3.5 py-2.5 mb-4 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <KpiCard label="Empresas clientes" value={empresas.length} sub={`${activas} activas`} />
+        <KpiCard label="Empresas suspendidas" value={suspendidas} accent="#C9483B" />
+        <KpiCard label="Plataforma" value="Online" sub="Conectado a Supabase" accent="#3F8F5F" />
       </div>
 
       <div className="rounded-xl border bg-white p-5" style={{ borderColor: "#E2E5E1" }}>
@@ -525,45 +534,53 @@ function SuperAdminDashboardView() {
           <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
             Empresas clientes
           </h3>
-          <Filter size={14} color="#9CA39A" />
+          {cargando && <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>Cargando...</span>}
         </div>
+
+        {!cargando && empresas.length === 0 && (
+          <p className="text-[12.5px] text-center py-6" style={{ color: "#9CA39A" }}>
+            Todavía no hay empresas clientes. Creá la primera en "Empresas clientes".
+          </p>
+        )}
+
         <div className="flex flex-col gap-3">
-          {EMPRESAS_CLIENTE.map((e) => {
-            const plan = planPorContratistas(e.contratistas);
-            return (
-              <div
-                key={e.id}
-                className="flex items-center justify-between py-2 border-b last:border-b-0"
-                style={{ borderColor: "#F0F1EE" }}
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-[11px] font-semibold"
-                    style={{ background: "#F7F8F6", color: "#6B7268" }}
-                  >
-                    <Building2 size={14} />
-                  </div>
-                  <div>
-                    <div className="text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razonSocial}</div>
-                    <div className="text-[11.5px]" style={{ color: "#9CA39A" }}>
-                      {e.rubro} · {e.contratistas} contratistas · Plan {plan.nombre}
-                    </div>
+          {empresas.map((e) => (
+            <div
+              key={e.id}
+              className="flex items-center justify-between py-2 border-b last:border-b-0"
+              style={{ borderColor: "#F0F1EE" }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-8 h-8 rounded-md flex items-center justify-center"
+                  style={{ background: "#F7F8F6" }}
+                >
+                  <Building2 size={14} color="#6B7268" />
+                </div>
+                <div>
+                  <div className="text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razon_social}</div>
+                  <div className="text-[11.5px]" style={{ color: "#9CA39A" }}>
+                    CUIT {e.cuit} {e.rubro ? `· ${e.rubro}` : ""} · Código: {e.codigo_vinculacion}
                   </div>
                 </div>
-                <span
-                  className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                  style={{ color: STATUS_EMPRESA[e.estado].color, background: STATUS_EMPRESA[e.estado].bg }}
-                >
-                  {STATUS_EMPRESA[e.estado].label}
-                </span>
               </div>
-            );
-          })}
+              <span
+                className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                style={{
+                  color: e.estado === "suspendida" ? "#C9483B" : "#3F8F5F",
+                  background: e.estado === "suspendida" ? "#FBEAE8" : "#EAF4ED"
+                }}
+              >
+                {e.estado === "suspendida" ? "Suspendida" : "Activa"}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 }
+
 
 function DashboardView() {
   const vigentes = CONTRACTORS.filter((c) => c.estado === "vigente").length;
@@ -1059,7 +1076,17 @@ function DocChecklistGroup({ title, docs, tone, session, onSubido }) {
                   )}
                   {d.estadoRevision === "pendiente" && (
                     <div className="text-[11px] mt-0.5 font-medium" style={{ color: "#B9791F" }}>
-                      Pendiente de revisión del auditor
+                      ⏳ Pendiente de revisión del auditor
+                    </div>
+                  )}
+                  {d.estadoRevision === "aprobado" && (
+                    <div className="text-[11px] mt-0.5 font-medium" style={{ color: "#3F8F5F" }}>
+                      ✓ Aprobado por el auditor
+                    </div>
+                  )}
+                  {d.estadoRevision === "rechazado" && (
+                    <div className="text-[11px] mt-0.5 font-medium" style={{ color: "#C9483B" }}>
+                      ✗ Rechazado — {d.motivoRechazo || "revisar el documento"} — volvé a subir
                     </div>
                   )}
                 </div>
@@ -1075,13 +1102,14 @@ function DocChecklistGroup({ title, docs, tone, session, onSubido }) {
                     <Eye size={13} /> Ver
                   </button>
                 )}
-                {estado !== "vigente" && (
+                {/* Mostrar "Subir" si: no hay archivo todavía, o si fue rechazado */}
+                {(!d.archivoPath || d.estadoRevision === "rechazado") && (
                   <button
                     onClick={() => setModalDoc(d.nombre)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium"
                     style={{ background: "#2C5F7C", color: "#fff" }}
                   >
-                    <Upload size={13} /> Subir
+                    <Upload size={13} /> {d.estadoRevision === "rechazado" ? "Resubir" : "Subir"}
                   </button>
                 )}
               </div>
@@ -1124,6 +1152,7 @@ function mezclarConSubidos(catalogo, subidos) {
       fechaEmision: real.fecha_emision ? new Date(real.fecha_emision + "T00:00:00") : undefined,
       fechaVencimiento: real.fecha_vencimiento ? new Date(real.fecha_vencimiento + "T00:00:00") : undefined,
       estadoRevision: real.estado_revision,
+      motivoRechazo: real.motivo_rechazo,
       archivoPath: real.archivo_path,
     };
   });
@@ -2086,6 +2115,24 @@ function FieldInput({ icon: Icon, label, type = "text", value, onChange, placeho
 const SUPABASE_URL = "https://jgelxbxplobvqbjrfabs.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Rpx0zhvNZXvZ6ZjDxRs6nQ_DSxxrqmD";
 
+async function obtenerEmpresasCliente({ accessToken }) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/empresas_cliente?select=id,razon_social,cuit,rubro,estado,codigo_vinculacion,created_at&order=created_at.desc`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error("No se pudieron traer las empresas.");
+  return res.json();
+}
+
+async function obtenerContratistasDeEmpresa({ accessToken, empresaClienteId }) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/contratistas?empresa_cliente_id=eq.${empresaClienteId}&select=id,razon_social,cuit,estado,created_at&order=created_at.desc`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!res.ok) throw new Error("No se pudieron traer los contratistas.");
+  return res.json();
+}
+
 async function loginSuperAdmin(email, password) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -2948,7 +2995,7 @@ export default function App() {
       <Sidebar role={role} setRole={setRole} view={view} setView={setView} onLogout={() => { setRole(null); setSession(null); }} />
       <main className="flex-1 overflow-auto">
         <Topbar title={meta?.title} subtitle={meta?.subtitle} />
-        {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView /> : <DashboardView />)}
+        {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView session={session} /> : <DashboardView />)}
         {view === "empresas" && <EmpresasView accessToken={session?.accessToken} />}
         {view === "planes" && <PlanesView />}
         {view === "contratistas" && <ContratistasView />}
