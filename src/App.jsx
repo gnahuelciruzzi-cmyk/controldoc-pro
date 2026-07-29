@@ -2929,3 +2929,439 @@ function AccessPortal({ onEnter }) {
             )}
 
             {selected === "contratista" && mode === "registro" && (
+              <>
+                <FieldInput icon={KeyRound} label="Código de tu empresa contratante" value={codigo} onChange={setCodigo} placeholder="EMP-7K2X9" mono />
+                <FieldInput icon={Building2} label="CUIT de tu empresa" value={cuit} onChange={setCuit} placeholder="30-71234567-8" mono />
+                <FieldInput icon={FileText} label="Razón Social" value={razonSocial} onChange={setRazonSocial} placeholder="Mi Empresa SRL" />
+                <FieldInput icon={UserCog} label="Email de acceso" value={email} onChange={setEmail} placeholder="contacto@miempresa.com" />
+                <FieldInput icon={Lock} label="Crear contraseña" type="password" value={password} onChange={setPassword} placeholder="••••••••" />
+                <p className="text-[11.5px] -mt-1" style={{ color: "#9CA39A" }}>
+                  El código te lo brinda la empresa para la que vas a trabajar. Sin código válido no podés registrarte.
+                </p>
+              </>
+            )}
+
+            {error && (
+              <div className="rounded-lg px-3.5 py-2.5 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleIngresar}
+              disabled={cargando}
+              className="rounded-lg py-2.5 text-[13px] font-semibold text-white mt-1"
+              style={{ background: type.accent, opacity: cargando ? 0.7 : 1 }}
+            >
+              {cargando
+                ? "Verificando..."
+                : selected === "contratista" && mode === "registro"
+                ? "Crear cuenta y vincularme"
+                : "Ingresar"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+async function crearEmpresaReal({ accessToken, razonSocial, cuit, rubro, email, password }) {
+  // 1. crear el usuario de login para esta empresa
+  const signupRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const signupData = await signupRes.json();
+  if (!signupRes.ok) throw new Error(signupData.error_description || signupData.msg || "No se pudo crear el usuario de la empresa.");
+  const userId = signupData.user?.id || signupData.id;
+  if (!userId) throw new Error("No se pudo obtener el ID del usuario creado.");
+
+  const codigo = "EMP-" + Math.random().toString(36).slice(2, 7).toUpperCase();
+
+  // 2. crear la fila de la empresa cliente
+  const empresaRes = await fetch(`${SUPABASE_URL}/rest/v1/empresas_cliente`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({ razon_social: razonSocial, cuit, codigo_vinculacion: codigo, rubro: rubro || null, email }),
+  });
+  const empresaData = await empresaRes.json();
+  if (!empresaRes.ok) throw new Error(empresaData.message || "No se pudo crear la empresa en la base de datos.");
+  const empresaId = empresaData[0].id;
+
+  // 3. vincular el usuario a la empresa con un perfil de rol "empresa"
+  const perfilRes = await fetch(`${SUPABASE_URL}/rest/v1/perfiles`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id: userId, rol: "empresa", nombre: razonSocial, empresa_cliente_id: empresaId }),
+  });
+  if (!perfilRes.ok) {
+    const perfilErr = await perfilRes.json();
+    throw new Error(perfilErr.message || "La empresa se creó, pero no se pudo vincular el perfil de usuario.");
+  }
+
+  return { codigo };
+}
+
+function EmpresasView({ accessToken }) {
+  const [items] = useState(EMPRESAS_CLIENTE);
+  const [showNew, setShowNew] = useState(false);
+  const [razonSocial, setRazonSocial] = useState("");
+  const [cuit, setCuit] = useState("");
+  const [rubro, setRubro] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [generated, setGenerated] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+
+  const crearCodigo = async () => {
+    setError("");
+    if (!accessToken) {
+      setError("Esta acción necesita tu sesión real de Super Admin. Volvé a iniciar sesión.");
+      return;
+    }
+    if (!razonSocial || !cuit || !email || !password) {
+      setError("Completá Razón Social, CUIT, email y contraseña antes de crear la empresa.");
+      return;
+    }
+    setCargando(true);
+    try {
+      const { codigo } = await crearEmpresaReal({ accessToken, razonSocial, cuit, rubro, email, password });
+      setGenerated(codigo);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <div className="px-8 pb-10">
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-[12.5px]" style={{ color: "#9CA39A" }}>
+          {items.length} empresas dadas de alta en la plataforma
+        </p>
+        <button
+          onClick={() => { setShowNew((s) => !s); setGenerated(null); }}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium"
+          style={{ background: "#2C5F7C", color: "#fff" }}
+        >
+          <Plus size={15} /> Nueva empresa cliente
+        </button>
+      </div>
+
+      {showNew && (
+        <div className="rounded-xl border bg-white p-5 mb-5" style={{ borderColor: "#E2E5E1" }}>
+          <h3 className="text-[13.5px] font-semibold mb-4" style={{ color: "#14181C" }}>
+            Dar de alta nueva empresa
+          </h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <FieldInput icon={FileText} label="Razón Social" value={razonSocial} onChange={setRazonSocial} placeholder="Minera del Sur S.A." />
+            <FieldInput icon={Building2} label="CUIT" value={cuit} onChange={setCuit} placeholder="30-71234567-8" mono />
+            <FieldInput icon={Briefcase} label="Rubro" value={rubro} onChange={setRubro} placeholder="Minería" />
+            <FieldInput icon={UserCog} label="Email de acceso" value={email} onChange={setEmail} placeholder="contacto@minerasur.com" />
+            <FieldInput icon={Lock} label="Contraseña de acceso" type="password" value={password} onChange={setPassword} placeholder="••••••••" />
+          </div>
+
+          {error && (
+            <div className="mb-3 rounded-lg px-3.5 py-2.5 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={crearCodigo}
+            disabled={cargando}
+            className="px-3.5 py-2 rounded-lg text-[13px] font-medium"
+            style={{ background: "#14181C", color: "#fff", opacity: cargando ? 0.7 : 1 }}
+          >
+            {cargando ? "Creando empresa..." : "Crear empresa y generar código"}
+          </button>
+
+          {generated && (
+            <div
+              className="mt-4 rounded-lg p-4 flex items-center justify-between"
+              style={{ background: "#EAF4ED", border: "1px solid #BFE0CB" }}
+            >
+              <div>
+                <div className="text-[11px] font-medium" style={{ color: "#3F8F5F" }}>
+                  ✓ Empresa y usuario creados en la base real. Código único — compartilo con sus contratistas
+                </div>
+                <div
+                  className="text-[18px] font-semibold mt-1"
+                  style={{ fontFamily: "'JetBrains Mono', monospace", color: "#2C5F7C", letterSpacing: "0.05em" }}
+                >
+                  {generated}
+                </div>
+              </div>
+              <Copy size={16} color="#9CA39A" />
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
+        <table className="w-full text-left">
+          <thead>
+            <tr style={{ background: "#F7F8F6" }}>
+              {["Código", "Razón Social", "CUIT", "Rubro", "Contratistas", "Plan", "Estado"].map((h) => (
+                <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((e) => (
+              <tr key={e.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
+                <td className="px-5 py-3.5 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#2C5F7C", fontWeight: 600 }}>
+                  {e.id}
+                </td>
+                <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razonSocial}</td>
+                <td className="px-5 py-3.5 text-[12.5px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{e.cuit}</td>
+                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.rubro}</td>
+                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.contratistas}</td>
+                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.plan}</td>
+                <td className="px-5 py-3.5">
+                  <span
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                    style={{ color: STATUS_EMPRESA[e.estado].color, background: STATUS_EMPRESA[e.estado].bg }}
+                  >
+                    {STATUS_EMPRESA[e.estado].label}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PlanesView({ session }) {
+  const [ciclo, setCiclo] = useState("mensual");
+  const [empresas, setEmpresas] = useState([]);
+  const [conteoMap, setConteoMap] = useState({}); // { empresa_id: cantidad_contratistas }
+  const [cargando, setCargando] = useState(false);
+
+  React.useEffect(() => {
+    if (!session?.accessToken) return;
+    setCargando(true);
+    obtenerEmpresasCliente({ accessToken: session.accessToken })
+      .then(async (emps) => {
+        setEmpresas(emps);
+        // para cada empresa, contamos sus contratistas
+        const conteos = await Promise.all(
+          emps.map(async (e) => {
+            const res = await fetch(
+              `${SUPABASE_URL}/rest/v1/contratistas?empresa_cliente_id=eq.${e.id}&select=id`,
+              { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } }
+            );
+            const data = await res.json();
+            return { id: e.id, count: Array.isArray(data) ? data.length : 0 };
+          })
+        );
+        const map = {};
+        conteos.forEach((c) => { map[c.id] = c.count; });
+        setConteoMap(map);
+      })
+      .finally(() => setCargando(false));
+  }, [session?.accessToken]);
+
+  const facturacionTotal = empresas.reduce((acc, e) => {
+    const n = conteoMap[e.id] || 0;
+    const plan = planPorContratistas(n);
+    const { total } = precioPorCiclo(plan.mensual, ciclo);
+    return acc + total;
+  }, 0);
+
+  return (
+    <div className="px-8 pb-10">
+      <div
+        className="rounded-xl border p-4 mb-6 flex items-start gap-3"
+        style={{ borderColor: "#E2E5E1", background: "#EAF1F4" }}
+      >
+        <TrendingUp size={16} color="#2C5F7C" className="mt-0.5 shrink-0" />
+        <p className="text-[12.5px]" style={{ color: "#1F4358" }}>
+          El plan de cada empresa se asigna automáticamente según su cantidad de contratistas activos.
+          Los precios son en <strong>USD</strong> y se actualizan en cuanto definás los valores finales.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
+          Escala de precios (USD) — valores provisorios
+        </h3>
+        <div className="flex gap-1 p-1 rounded-lg" style={{ background: "#F7F8F6", border: "1px solid #E2E5E1" }}>
+          {[
+            { id: "mensual", label: "Mensual" },
+            { id: "semestral", label: "Semestral" },
+            { id: "anual", label: "Anual" },
+          ].map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setCiclo(c.id)}
+              className="px-3.5 py-1.5 rounded-md text-[12.5px] font-medium"
+              style={{
+                background: ciclo === c.id ? "#fff" : "transparent",
+                color: ciclo === c.id ? "#14181C" : "#9CA39A",
+                boxShadow: ciclo === c.id ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 mb-8">
+        {PLANES.map((p) => {
+          const { total, label } = precioPorCiclo(p.mensual, ciclo);
+          return (
+            <div key={p.id} className="rounded-xl border bg-white p-5" style={{ borderColor: "#E2E5E1" }}>
+              <div className="text-[12px] font-medium mb-3" style={{ color: "#9CA39A" }}>
+                {p.min}–{p.max === Infinity ? "∞" : p.max} contratistas
+              </div>
+              <div className="text-[15px] font-semibold mb-1" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#14181C" }}>
+                {p.nombre}
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#2C5F7C" }}>
+                  ${total}
+                </span>
+                <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>{label}</span>
+              </div>
+              {ciclo !== "mensual" && (
+                <div className="text-[11px] mt-1" style={{ color: "#9CA39A" }}>Descuento a definir</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
+          Plan actual por empresa
+        </h3>
+        {empresas.length > 0 && (
+          <div className="text-[12.5px] font-medium" style={{ color: "#2C5F7C" }}>
+            Facturación {ciclo} estimada: <strong>${facturacionTotal} USD</strong>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
+        <table className="w-full text-left">
+          <thead>
+            <tr style={{ background: "#F7F8F6" }}>
+              {["Empresa", "CUIT", "Contratistas", "Plan asignado", `Costo (${ciclo})`].map((h) => (
+                <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {cargando && (
+              <tr>
+                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
+                  Cargando empresas...
+                </td>
+              </tr>
+            )}
+            {!cargando && empresas.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
+                  Todavía no hay empresas clientes registradas.
+                </td>
+              </tr>
+            )}
+            {empresas.map((e) => {
+              const n = conteoMap[e.id] || 0;
+              const plan = planPorContratistas(n);
+              const { total } = precioPorCiclo(plan.mensual, ciclo);
+              return (
+                <tr key={e.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
+                  <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razon_social}</td>
+                  <td className="px-5 py-3.5 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{e.cuit}</td>
+                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{n}</td>
+                  <td className="px-5 py-3.5 text-[13px] font-semibold" style={{ color: "#2C5F7C" }}>{plan.nombre}</td>
+                  <td className="px-5 py-3.5 text-[13px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#14181C" }}>${total}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const TITLES = {
+  dashboard: { title: "Dashboard ejecutivo", subtitle: "Resumen general de cumplimiento documental" },
+  empresas: { title: "Empresas clientes", subtitle: "Altas, códigos de vinculación y estado de cuenta" },
+  planes: { title: "Planes y facturación", subtitle: "Escala de precios por cantidad de contratistas" },
+  contratistas: { title: "Contratistas", subtitle: "Empresas habilitadas y su estado de documentación" },
+  documentos: { title: "Documentos", subtitle: "Carga, vencimientos y estado por documento" },
+  ats: { title: "ATS — Análisis Preliminar de Tareas", subtitle: "Definí el tipo de contratista y los riesgos de tu tarea" },
+  vehiculos: { title: "Vehículos", subtitle: "Documentación de vehículos comunes e industriales" },
+  nomina: { title: "Nómina de trabajadores", subtitle: "Cargá el listado de tu personal desde Excel, CSV o manualmente" },
+  reportes: { title: "Reportes", subtitle: "Exportables para auditorías y seguimiento" },
+  aprobaciones: { title: "Aprobaciones pendientes", subtitle: "Documentación cargada esperando revisión" },
+  accesos: { title: "Control de acceso", subtitle: "Verificación de habilitación en portería" },
+};
+
+export default function App() {
+  const [role, setRole] = useState(null);
+  const [view, setView] = useState("dashboard");
+  const [ats, setAts] = useState({ tipo: "empresa", riesgos: [] });
+  const [session, setSession] = useState(null); // { accessToken, perfil } — solo se llena en login real
+
+  const selectRole = (r, sessionData) => {
+    setRole(r);
+    setSession(sessionData || null);
+    setView(NAV_BY_ROLE[r][0].id);
+  };
+
+  if (!role) return <AccessPortal onEnter={selectRole} />;
+
+  const meta = TITLES[view];
+
+  return (
+    <div
+      className="flex min-h-[640px]"
+      style={{ background: "#F7F8F6", fontFamily: "'Inter', sans-serif" }}
+    >
+      <Sidebar role={role} setRole={setRole} view={view} setView={setView} onLogout={() => { setRole(null); setSession(null); }} />
+      <main className="flex-1 overflow-auto">
+        <Topbar title={meta?.title} subtitle={meta?.subtitle} />
+        {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView session={session} /> : <DashboardView />)}
+        {view === "empresas" && <EmpresasView accessToken={session?.accessToken} />}
+        {view === "planes" && <PlanesView session={session} />}
+        {view === "contratistas" && <ContratistasView session={session} />}
+        {view === "documentos" && <DocumentosView role={role} ats={ats} session={session} />}
+        {view === "ats" && <ATSView ats={ats} setAts={setAts} />}
+        {view === "vehiculos" && <VehiculosView />}
+        {view === "nomina" && <NominaView session={session} />}
+        {view === "trabajadores" && <TrabajadoresView role={role} session={session} />}
+        {view === "reportes" && <ReportesView />}
+        {view === "aprobaciones" && <AprobacionesView session={session} />}
+        {view === "accesos" && <AccesosView />}
+      </main>
+    </div>
+  );
+}
