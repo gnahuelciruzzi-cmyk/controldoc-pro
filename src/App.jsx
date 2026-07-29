@@ -1395,27 +1395,187 @@ function VehiculosView() {
   );
 }
 
-function TrabajadoresView({ role }) {
+function TrabajadoresView({ role, session }) {
   const [seleccionado, setSeleccionado] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  const [trabajadores, setTrabajadores] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+  const [showAgregar, setShowAgregar] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoDni, setNuevoDni] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [refrescar, setRefrescar] = useState(0);
+
+  const contratistaId = session?.perfil?.contratista_id;
+  const empresaId = session?.perfil?.empresa_cliente_id;
+  const modoReal = !!(session?.accessToken && (contratistaId || empresaId));
+
+  React.useEffect(() => {
+    if (!modoReal) return;
+    setCargando(true);
+    setError("");
+    let url = `${SUPABASE_URL}/rest/v1/trabajadores?select=id,nombre,dni,contratista_id,contratistas(razon_social)&order=created_at.desc`;
+    fetch(url, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } })
+      .then((r) => r.json())
+      .then((data) => setTrabajadores(Array.isArray(data) ? data : []))
+      .catch((e) => setError(e.message))
+      .finally(() => setCargando(false));
+  }, [modoReal, session?.accessToken, contratistaId, empresaId, refrescar]);
+
+  const agregarTrabajador = async () => {
+    if (!nuevoNombre || !nuevoDni) { setError("Completá nombre y DNI."); return; }
+    setGuardando(true);
+    setError("");
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/trabajadores`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.accessToken}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ nombre: nuevoNombre, dni: nuevoDni, contratista_id: contratistaId }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message || "No se pudo agregar."); }
+      setNuevoNombre(""); setNuevoDni(""); setShowAgregar(false);
+      setRefrescar((n) => n + 1);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const filtrados = trabajadores.filter(
+    (t) => t.nombre.toLowerCase().includes(busqueda.toLowerCase()) || t.dni.includes(busqueda)
+  );
+
+  // agrupados por contratista para la vista de Empresa
+  const grupos = role === "empresa"
+    ? Object.values(filtrados.reduce((acc, t) => {
+        const nombre = t.contratistas?.razon_social || "Sin contratista";
+        (acc[nombre] ||= { contratista: nombre, trabajadores: [] }).trabajadores.push(t);
+        return acc;
+      }, {}))
+    : [{ contratista: "", trabajadores: filtrados }];
 
   if (seleccionado) {
-    const t = seleccionado;
-    const habilitado = trabajadorHabilitado(t);
     return (
       <div className="px-8 pb-10">
-        <button
-          onClick={() => setSeleccionado(null)}
-          className="flex items-center gap-1.5 text-[12.5px] font-medium mb-5"
-          style={{ color: "#6B7268" }}
-        >
+        <button onClick={() => setSeleccionado(null)} className="flex items-center gap-1.5 text-[12.5px] font-medium mb-5" style={{ color: "#6B7268" }}>
           <ArrowLeft size={14} /> Volver a trabajadores
         </button>
+        <div className="rounded-xl border bg-white p-5 mb-5 flex items-center justify-between" style={{ borderColor: "#E2E5E1" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-full flex items-center justify-center text-[13px] font-semibold" style={{ background: "#EAF1F4", color: "#2C5F7C" }}>
+              {seleccionado.nombre.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+            </div>
+            <div>
+              <div className="text-[14px] font-semibold" style={{ color: "#14181C" }}>{seleccionado.nombre}</div>
+              <div className="text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9CA39A" }}>DNI {seleccionado.dni}</div>
+            </div>
+          </div>
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold" style={{ background: "#EAF4ED", color: "#3F8F5F" }}>
+            <Check size={13} /> Registrado
+          </span>
+        </div>
+        <div className="rounded-xl border bg-white p-5" style={{ borderColor: "#E2E5E1" }}>
+          <p className="text-[12.5px]" style={{ color: "#9CA39A" }}>
+            La carga de documentos individuales por trabajador (apto médico, capacitaciones, etc.) se conecta en la próxima versión.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-        <div
-          className="rounded-xl border bg-white p-5 mb-5 flex items-center justify-between"
-          style={{ borderColor: "#E2E5E1" }}
-        >
+  return (
+    <div className="px-8 pb-10">
+      {error && <div className="rounded-lg px-3.5 py-2.5 mb-4 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>{error}</div>}
+
+      <div className="flex items-center justify-between mb-5 gap-3">
+        <div className="flex items-center gap-2 rounded-lg border px-3 py-2 flex-1 max-w-[320px]" style={{ borderColor: "#E2E5E1", background: "#fff" }}>
+          <Search size={14} color="#9CA39A" />
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar por nombre o DNI..." className="text-[13px] outline-none bg-transparent w-full" />
+        </div>
+        <p className="text-[12px] shrink-0" style={{ color: "#9CA39A" }}>{filtrados.length} trabajador{filtrados.length !== 1 ? "es" : ""}</p>
+        {role === "contratista" && (
+          <button onClick={() => setShowAgregar(!showAgregar)} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium shrink-0" style={{ background: "#2C5F7C", color: "#fff" }}>
+            <Plus size={15} /> Agregar trabajador
+          </button>
+        )}
+      </div>
+
+      {showAgregar && (
+        <div className="rounded-xl border bg-white p-5 mb-5" style={{ borderColor: "#E2E5E1" }}>
+          <h3 className="text-[13.5px] font-semibold mb-4" style={{ color: "#14181C" }}>Nuevo trabajador</h3>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label className="text-[11.5px] font-medium block mb-1" style={{ color: "#6B7268" }}>Nombre completo</label>
+              <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Juan Pérez" className="rounded-lg border px-3 py-2 text-[13px] outline-none w-full" style={{ borderColor: "#E2E5E1" }} />
+            </div>
+            <div>
+              <label className="text-[11.5px] font-medium block mb-1" style={{ color: "#6B7268" }}>DNI</label>
+              <input value={nuevoDni} onChange={(e) => setNuevoDni(e.target.value)} placeholder="30.412.876" className="rounded-lg border px-3 py-2 text-[13px] outline-none w-full" style={{ borderColor: "#E2E5E1", fontFamily: "'JetBrains Mono', monospace" }} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowAgregar(false)} className="px-3.5 py-2 rounded-lg text-[12.5px] border" style={{ borderColor: "#E2E5E1", color: "#4B524A" }}>Cancelar</button>
+            <button onClick={agregarTrabajador} disabled={guardando} className="px-3.5 py-2 rounded-lg text-[12.5px] font-medium" style={{ background: "#2C5F7C", color: "#fff", opacity: guardando ? 0.7 : 1 }}>
+              {guardando ? "Guardando..." : "Guardar trabajador"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cargando && <p className="text-[12px]" style={{ color: "#9CA39A" }}>Cargando trabajadores...</p>}
+
+      {!cargando && filtrados.length === 0 && (
+        <div className="rounded-xl border bg-white p-8 text-center" style={{ borderColor: "#E2E5E1" }}>
+          <p className="text-[13px]" style={{ color: "#9CA39A" }}>
+            {role === "contratista" ? "Todavía no cargaste trabajadores. Usá el botón \"Agregar trabajador\"." : "No hay trabajadores registrados todavía."}
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-6">
+        {grupos.map((g) => (
+          <div key={g.contratista}>
+            {role === "empresa" && g.contratista && (
+              <div className="flex items-center gap-2 mb-2.5">
+                <Building2 size={14} color="#6B7268" />
+                <span className="text-[12.5px] font-semibold" style={{ color: "#14181C" }}>{g.contratista}</span>
+                <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>· {g.trabajadores.length}</span>
+              </div>
+            )}
+            <div className="flex flex-col gap-2.5">
+              {g.trabajadores.map((t) => (
+                <button key={t.id} onClick={() => setSeleccionado(t)} className="rounded-xl border bg-white px-5 py-4 flex items-center justify-between text-left" style={{ borderColor: "#E2E5E1" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0" style={{ background: "#EAF1F4", color: "#2C5F7C" }}>
+                      {t.nombre.split(" ").map((n) => n[0]).slice(0, 2).join("")}
+                    </div>
+                    <div>
+                      <div className="text-[13.5px] font-medium" style={{ color: "#14181C" }}>{t.nombre}</div>
+                      <div className="text-[11.5px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9CA39A" }}>DNI {t.dni}</div>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold" style={{ background: "#EAF4ED", color: "#3F8F5F" }}>
+                    <Check size={13} /> Registrado
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+
           <div className="flex items-center gap-3">
             <div
               className="w-11 h-11 rounded-full flex items-center justify-center text-[13px] font-semibold"
@@ -1430,192 +1590,6 @@ function TrabajadoresView({ role }) {
               </div>
             </div>
           </div>
-          {habilitado ? (
-            <span
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold"
-              style={{ background: "#EAF4ED", color: "#3F8F5F" }}
-            >
-              <Check size={13} /> Habilitado
-            </span>
-          ) : (
-            <span
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold"
-              style={{ background: "#FBEAE8", color: "#C9483B" }}
-            >
-              <AlertTriangle size={13} /> Inhabilitado
-            </span>
-          )}
-        </div>
-
-        {!habilitado && (
-          <div
-            className="rounded-xl border px-4 py-3 mb-5 text-[12.5px]"
-            style={{ borderColor: "#F3C9C3", background: "#FBEAE8", color: "#8A2E25" }}
-          >
-            Te falta presentar {docsFaltantes(t).length} documento(s) para habilitar a {t.nombre.split(" ")[0]}.
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2.5">
-          {t.documentos.map((d, i) => {
-            const estado = getEstadoDocumento(d);
-            const venc = getVencimiento(d);
-            return (
-              <div
-                key={i}
-                className="rounded-xl border bg-white px-5 py-3.5 flex items-center justify-between"
-                style={{ borderColor: estado === "vigente" ? "#E2E5E1" : "#F3C9C3" }}
-              >
-                <div className="flex items-center gap-3">
-                  <FileText size={16} color="#6B7268" />
-                  <div>
-                    <span className="text-[13px]" style={{ color: "#14181C" }}>{d.nombre}</span>
-                    {venc && (
-                      <div className="text-[11px] mt-0.5" style={{ color: "#9CA39A" }}>
-                        Vence: {fmtFecha(venc)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Stamp estado={estado} size="sm" />
-                  {estado !== "vigente" && (
-                    <button
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium"
-                      style={{ background: "#2C5F7C", color: "#fff" }}
-                    >
-                      <Upload size={13} /> Subir
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // Contratista: solo ve a su propia gente. Empresa: ve todo, pero agrupado, nunca mezclado.
-  const propios = TRABAJADORES.filter((t) => t.contratista === CONTRATISTA_LOGUEADO);
-  const baseList = role === "contratista" ? propios : TRABAJADORES;
-
-  const filtrados = baseList.filter(
-    (t) => t.nombre.toLowerCase().includes(busqueda.toLowerCase()) || t.dni.includes(busqueda)
-  );
-
-  const grupos =
-    role === "empresa"
-      ? Object.values(
-          filtrados.reduce((acc, t) => {
-            (acc[t.contratista] ||= { contratista: t.contratista, trabajadores: [] }).trabajadores.push(t);
-            return acc;
-          }, {})
-        )
-      : [{ contratista: CONTRATISTA_LOGUEADO, trabajadores: filtrados }];
-
-  const renderCard = (t) => {
-    const habilitado = trabajadorHabilitado(t);
-    const faltan = docsFaltantes(t);
-    return (
-      <button
-        key={t.id}
-        onClick={() => setSeleccionado(t)}
-        className="rounded-xl border bg-white px-5 py-4 flex items-center justify-between text-left"
-        style={{ borderColor: habilitado ? "#E2E5E1" : "#F3C9C3" }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0"
-            style={{ background: "#EAF1F4", color: "#2C5F7C" }}
-          >
-            {t.nombre.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-          </div>
-          <div>
-            <div className="text-[13.5px] font-medium" style={{ color: "#14181C" }}>{t.nombre}</div>
-            <div className="text-[11.5px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9CA39A" }}>
-              DNI {t.dni}
-            </div>
-          </div>
-        </div>
-
-        {habilitado ? (
-          <span
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold"
-            style={{ background: "#EAF4ED", color: "#3F8F5F" }}
-          >
-            <Check size={13} /> Habilitado
-          </span>
-        ) : (
-          <span
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11.5px] font-semibold"
-            style={{ background: "#FBEAE8", color: "#C9483B" }}
-          >
-            <AlertTriangle size={13} /> Faltan {faltan.length} doc.
-          </span>
-        )}
-      </button>
-    );
-  };
-
-  return (
-    <div className="px-8 pb-10">
-      {role === "contratista" && (
-        <div
-          className="rounded-lg px-4 py-2.5 mb-5 flex items-center gap-2 w-fit"
-          style={{ background: "#EAF1F4", border: "1px solid #DCE7EB" }}
-        >
-          <Building2 size={14} color="#2C5F7C" />
-          <span className="text-[12.5px] font-medium" style={{ color: "#2C5F7C" }}>{CONTRATISTA_LOGUEADO}</span>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between mb-5 gap-3">
-        <p className="text-[12.5px] shrink-0" style={{ color: "#9CA39A" }}>
-          {baseList.length} trabajadores · {baseList.filter(trabajadorHabilitado).length} habilitados
-        </p>
-        {role === "empresa" && (
-          <div
-            className="flex items-center gap-2 rounded-lg border px-3 py-2 flex-1 max-w-[320px]"
-            style={{ borderColor: "#E2E5E1", background: "#fff" }}
-          >
-            <Search size={14} color="#9CA39A" />
-            <input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar por nombre o DNI..."
-              className="text-[13px] outline-none bg-transparent w-full"
-            />
-          </div>
-        )}
-        <button
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium shrink-0"
-          style={{ background: "#2C5F7C", color: "#fff" }}
-        >
-          <Plus size={15} /> Agregar trabajador
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-6">
-        {grupos.map((g) => (
-          <div key={g.contratista}>
-            {role === "empresa" && (
-              <div className="flex items-center gap-2 mb-2.5">
-                <Building2 size={14} color="#6B7268" />
-                <span className="text-[12.5px] font-semibold" style={{ color: "#14181C" }}>{g.contratista}</span>
-                <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>· {g.trabajadores.length}</span>
-              </div>
-            )}
-            <div className="flex flex-col gap-2.5">{g.trabajadores.map(renderCard)}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-
 const IA_META = {
   ok: { label: "IA: todo OK", color: "#3F8F5F", bg: "#EAF4ED" },
   revisar: { label: "IA: revisar", color: "#B9791F", bg: "#FBF2E2" },
@@ -3095,7 +3069,7 @@ export default function App() {
         {view === "documentos" && <DocumentosView role={role} ats={ats} session={session} />}
         {view === "ats" && <ATSView ats={ats} setAts={setAts} />}
         {view === "vehiculos" && <VehiculosView />}
-        {view === "trabajadores" && <TrabajadoresView role={role} />}
+        {view === "trabajadores" && <TrabajadoresView role={role} session={session} />}
         {view === "reportes" && <ReportesView />}
         {view === "aprobaciones" && <AprobacionesView session={session} />}
         {view === "accesos" && <AccesosView />}
