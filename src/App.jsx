@@ -130,6 +130,29 @@ const STATUS_META = {
   faltante: { label: "Falta cargar", color: "#6B7268", bg: "#EDEEEB" },
 };
 
+const PLANES = [
+  { id: "basico", nombre: "Básico", min: 1, max: 15, mensual: 49 },
+  { id: "profesional", nombre: "Profesional", min: 16, max: 30, mensual: 89 },
+  { id: "avanzado", nombre: "Avanzado", min: 31, max: 50, mensual: 149 },
+  { id: "enterprise", nombre: "Enterprise", min: 51, max: Infinity, mensual: 249 },
+];
+
+function planPorContratistas(n) {
+  if (!n || n <= 0) return PLANES[0]; // sin contratistas → plan Básico por defecto
+  return PLANES.find((p) => n >= p.min && n <= p.max) || PLANES[PLANES.length - 1];
+}
+
+function precioPorCiclo(mensual, ciclo) {
+  if (ciclo === "semestral") return { total: Math.round(mensual * 6), label: "/ 6 meses" };
+  if (ciclo === "anual") return { total: Math.round(mensual * 12), label: "/ año" };
+  return { total: mensual, label: "/ mes" };
+}
+
+const STATUS_EMPRESA = {
+  activa: { label: "Activa", color: "#3F8F5F", bg: "#EAF4ED" },
+  suspendida: { label: "Suspendida", color: "#C9483B", bg: "#FBEAE8" },
+};
+
 /* ---------- Catálogo documental (matriz ATS -> documentación) ---------- */
 
 const RIESGOS_ATS = [
