@@ -1063,11 +1063,16 @@ function DocChecklistGroup({ title, docs, tone, session, onSubido }) {
         {docs.map((d, i) => {
           const estado = getEstadoDocumento(d);
           const venc = getVencimiento(d);
+          const bordeRojo = d.estadoRevision === "rechazado" || (d.estadoRevision !== "pendiente" && d.estadoRevision !== "aprobado" && estado !== "vigente");
+          const selloEstado = d.estadoRevision === "aprobado" ? estado
+            : d.estadoRevision === "rechazado" ? "vencido"
+            : d.estadoRevision === "pendiente" ? "por_vencer"
+            : estado;
           return (
             <div
               key={i}
               className="rounded-xl border bg-white px-5 py-3.5 flex items-center justify-between"
-              style={{ borderColor: estado === "vigente" ? "#E2E5E1" : "#F3C9C3" }}
+              style={{ borderColor: bordeRojo ? "#F3C9C3" : "#E2E5E1" }}
             >
               <div className="flex items-center gap-3">
                 <FileText size={16} color="#6B7268" className="shrink-0" />
@@ -1096,7 +1101,7 @@ function DocChecklistGroup({ title, docs, tone, session, onSubido }) {
                 </div>
               </div>
               <div className="flex items-center gap-2.5 shrink-0">
-                <Stamp estado={estado} size="sm" />
+                <Stamp estado={selloEstado} size="sm" />
                 {d.archivoPath && (
                   <button
                     onClick={() => verArchivo(d.archivoPath)}
@@ -1145,11 +1150,16 @@ async function obtenerDocumentosContratista({ accessToken, contratistaId }) {
 }
 
 // combina el catálogo requerido con lo realmente subido a la base
+// si hay varios documentos del mismo nombre, toma el MÁS RECIENTE
 function mezclarConSubidos(catalogo, subidos) {
   return catalogo.map((d) => {
-    // tomamos la carga más reciente de ese nombre de documento
-    const real = subidos.find((s) => s.nombre_documento === d.nombre);
+    // filtramos todos los del mismo nombre y tomamos el más reciente (ya vienen ordenados por created_at desc)
+    const historial = subidos.filter((s) => s.nombre_documento === d.nombre);
+    const real = historial[0]; // el más reciente
     if (!real) return d; // todavía no se subió nada para este ítem
+
+    // si fue aprobado, calculamos el estado real por fecha
+    // si está pendiente o rechazado, forzamos ese estado visualmente
     return {
       ...d,
       tipo: real.fecha_emision ? "antiguedad6m" : "vencimiento",
@@ -1158,6 +1168,7 @@ function mezclarConSubidos(catalogo, subidos) {
       estadoRevision: real.estado_revision,
       motivoRechazo: real.motivo_rechazo,
       archivoPath: real.archivo_path,
+      historialCount: historial.length, // cuántas veces se intentó subir
     };
   });
 }
