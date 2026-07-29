@@ -2868,8 +2868,42 @@ function EmpresasView({ accessToken }) {
   );
 }
 
-function PlanesView() {
+function PlanesView({ session }) {
   const [ciclo, setCiclo] = useState("mensual");
+  const [empresas, setEmpresas] = useState([]);
+  const [conteoMap, setConteoMap] = useState({}); // { empresa_id: cantidad_contratistas }
+  const [cargando, setCargando] = useState(false);
+
+  React.useEffect(() => {
+    if (!session?.accessToken) return;
+    setCargando(true);
+    obtenerEmpresasCliente({ accessToken: session.accessToken })
+      .then(async (emps) => {
+        setEmpresas(emps);
+        // para cada empresa, contamos sus contratistas
+        const conteos = await Promise.all(
+          emps.map(async (e) => {
+            const res = await fetch(
+              `${SUPABASE_URL}/rest/v1/contratistas?empresa_cliente_id=eq.${e.id}&select=id`,
+              { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } }
+            );
+            const data = await res.json();
+            return { id: e.id, count: Array.isArray(data) ? data.length : 0 };
+          })
+        );
+        const map = {};
+        conteos.forEach((c) => { map[c.id] = c.count; });
+        setConteoMap(map);
+      })
+      .finally(() => setCargando(false));
+  }, [session?.accessToken]);
+
+  const facturacionTotal = empresas.reduce((acc, e) => {
+    const n = conteoMap[e.id] || 0;
+    const plan = planPorContratistas(n);
+    const { total } = precioPorCiclo(plan.mensual, ciclo);
+    return acc + total;
+  }, 0);
 
   return (
     <div className="px-8 pb-10">
@@ -2879,14 +2913,14 @@ function PlanesView() {
       >
         <TrendingUp size={16} color="#2C5F7C" className="mt-0.5 shrink-0" />
         <p className="text-[12.5px]" style={{ color: "#1F4358" }}>
-          El plan de cada empresa se asigna según su cantidad de contratistas activos.
-          Si una empresa supera el límite de su plan, <strong>sube de categoría automáticamente</strong> en el próximo ciclo de facturación.
+          El plan de cada empresa se asigna automáticamente según su cantidad de contratistas activos.
+          Los precios son en <strong>USD</strong> y se actualizan en cuanto definás los valores finales.
         </p>
       </div>
 
       <div className="flex items-center justify-between mb-5">
         <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
-          Escala de precios (USD)
+          Escala de precios (USD) — valores provisorios
         </h3>
         <div className="flex gap-1 p-1 rounded-lg" style={{ background: "#F7F8F6", border: "1px solid #E2E5E1" }}>
           {[
@@ -2928,23 +2962,29 @@ function PlanesView() {
                 <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>{label}</span>
               </div>
               {ciclo !== "mensual" && (
-                <div className="text-[11px] mt-1" style={{ color: "#9CA39A" }}>
-                  Descuento a definir
-                </div>
+                <div className="text-[11px] mt-1" style={{ color: "#9CA39A" }}>Descuento a definir</div>
               )}
             </div>
           );
         })}
       </div>
 
-      <h3 className="text-[14px] font-semibold mb-4" style={{ color: "#14181C" }}>
-        Plan actual por empresa
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
+          Plan actual por empresa
+        </h3>
+        {empresas.length > 0 && (
+          <div className="text-[12.5px] font-medium" style={{ color: "#2C5F7C" }}>
+            Facturación {ciclo} estimada: <strong>${facturacionTotal} USD</strong>
+          </div>
+        )}
+      </div>
+
       <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
         <table className="w-full text-left">
           <thead>
             <tr style={{ background: "#F7F8F6" }}>
-              {["Empresa", "Contratistas", "Plan asignado", "Costo (" + ciclo + ")", "Ciclo"].map((h) => (
+              {["Empresa", "CUIT", "Contratistas", "Plan asignado", `Costo (${ciclo})`].map((h) => (
                 <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
                   {h}
                 </th>
@@ -2952,16 +2992,31 @@ function PlanesView() {
             </tr>
           </thead>
           <tbody>
-            {EMPRESAS_CLIENTE.map((e) => {
-              const plan = planPorContratistas(e.contratistas);
+            {cargando && (
+              <tr>
+                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
+                  Cargando empresas...
+                </td>
+              </tr>
+            )}
+            {!cargando && empresas.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
+                  Todavía no hay empresas clientes registradas.
+                </td>
+              </tr>
+            )}
+            {empresas.map((e) => {
+              const n = conteoMap[e.id] || 0;
+              const plan = planPorContratistas(n);
               const { total } = precioPorCiclo(plan.mensual, ciclo);
               return (
                 <tr key={e.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
-                  <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razonSocial}</td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.contratistas}</td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#2C5F7C", fontWeight: 600 }}>{plan.nombre}</td>
+                  <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razon_social}</td>
+                  <td className="px-5 py-3.5 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{e.cuit}</td>
+                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{n}</td>
+                  <td className="px-5 py-3.5 text-[13px] font-semibold" style={{ color: "#2C5F7C" }}>{plan.nombre}</td>
                   <td className="px-5 py-3.5 text-[13px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#14181C" }}>${total}</td>
-                  <td className="px-5 py-3.5 text-[12.5px] capitalize" style={{ color: "#4B524A" }}>{ciclo}</td>
                 </tr>
               );
             })}
@@ -3012,7 +3067,7 @@ export default function App() {
         <Topbar title={meta?.title} subtitle={meta?.subtitle} />
         {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView session={session} /> : <DashboardView />)}
         {view === "empresas" && <EmpresasView accessToken={session?.accessToken} />}
-        {view === "planes" && <PlanesView />}
+        {view === "planes" && <PlanesView session={session} />}
         {view === "contratistas" && <ContratistasView session={session} />}
         {view === "documentos" && <DocumentosView role={role} ats={ats} session={session} />}
         {view === "ats" && <ATSView ats={ats} setAts={setAts} />}
