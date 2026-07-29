@@ -699,108 +699,112 @@ function EmergenciaCard({ emergencia, compact }) {
   );
 }
 
-function ContratistasView() {
-  const [filtro, setFiltro] = useState("todos");
-  const [expandido, setExpandido] = useState(null);
-  const list = useMemo(
-    () => CONTRACTORS.filter((c) => filtro === "todos" || c.estado === filtro),
-    [filtro]
+function ContratistasView({ session }) {
+  const [contratistas, setContratistas] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+  const [busqueda, setBusqueda] = useState("");
+
+  React.useEffect(() => {
+    if (!session?.accessToken || !session?.perfil?.empresa_cliente_id) return;
+    setCargando(true);
+    obtenerContratistasDeEmpresa({
+      accessToken: session.accessToken,
+      empresaClienteId: session.perfil.empresa_cliente_id,
+    })
+      .then(setContratistas)
+      .catch((e) => setError(e.message))
+      .finally(() => setCargando(false));
+  }, [session?.accessToken, session?.perfil?.empresa_cliente_id]);
+
+  const filtrados = contratistas.filter(
+    (c) =>
+      c.razon_social.toLowerCase().includes(busqueda.toLowerCase()) ||
+      c.cuit.includes(busqueda)
   );
+
   return (
     <div className="px-8 pb-10">
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex gap-2">
-          {["todos", "vigente", "por_vencer", "vencido"].map((f) => (
-            <button
-              key={f}
-              onClick={() => setFiltro(f)}
-              className="px-3 py-1.5 rounded-full text-[12px] font-medium border"
-              style={{
-                borderColor: filtro === f ? "#2C5F7C" : "#E2E5E1",
-                background: filtro === f ? "#2C5F7C" : "#fff",
-                color: filtro === f ? "#fff" : "#4B524A",
-              }}
-            >
-              {f === "todos" ? "Todos" : STATUS_META[f].label}
-            </button>
-          ))}
+      {error && (
+        <div className="rounded-lg px-3.5 py-2.5 mb-4 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
+          {error}
         </div>
-        <button
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium"
-          style={{ background: "#2C5F7C", color: "#fff" }}
+      )}
+
+      <div className="flex items-center justify-between mb-5 gap-3">
+        <div
+          className="flex items-center gap-2 rounded-lg border px-3 py-2 flex-1 max-w-[320px]"
+          style={{ borderColor: "#E2E5E1", background: "#fff" }}
         >
-          <Plus size={15} /> Nuevo contratista
-        </button>
+          <Search size={14} color="#9CA39A" />
+          <input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por razón social o CUIT..."
+            className="text-[13px] outline-none bg-transparent w-full"
+          />
+        </div>
+        <p className="text-[12px] shrink-0" style={{ color: "#9CA39A" }}>
+          {filtrados.length} contratista{filtrados.length !== 1 ? "s" : ""} vinculado{filtrados.length !== 1 ? "s" : ""}
+        </p>
       </div>
 
-      <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
-        <table className="w-full text-left">
-          <thead>
-            <tr style={{ background: "#F7F8F6" }}>
-              {["ID", "Empresa", "Rubro", "Trabajadores", "Estado", "", ""].map((h, i) => (
-                <th
-                  key={i}
-                  className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide"
-                  style={{ color: "#9CA39A" }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((c) => (
-              <React.Fragment key={c.id}>
-                <tr className="border-t" style={{ borderColor: "#F0F1EE" }}>
-                  <td
-                    className="px-5 py-3.5 text-[12.5px]"
-                    style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}
-                  >
-                    {c.id}
-                  </td>
+      {cargando && <p className="text-[12px]" style={{ color: "#9CA39A" }}>Cargando contratistas...</p>}
+
+      {!cargando && filtrados.length === 0 && (
+        <div className="rounded-xl border bg-white p-8 text-center" style={{ borderColor: "#E2E5E1" }}>
+          <p className="text-[13px]" style={{ color: "#9CA39A" }}>
+            {contratistas.length === 0
+              ? "Todavía no hay contratistas registrados. Compartí tu código de vinculación para que se registren."
+              : "No se encontraron resultados para esa búsqueda."}
+          </p>
+        </div>
+      )}
+
+      {filtrados.length > 0 && (
+        <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
+          <table className="w-full text-left">
+            <thead>
+              <tr style={{ background: "#F7F8F6" }}>
+                {["Razón Social", "CUIT", "Estado", "Alta"].map((h) => (
+                  <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtrados.map((c) => (
+                <tr key={c.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
                   <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>
-                    {c.empresa}
+                    {c.razon_social}
                   </td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>
-                    {c.rubro}
-                  </td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>
-                    {c.trabajadores}
+                  <td className="px-5 py-3.5 text-[12.5px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>
+                    {c.cuit}
                   </td>
                   <td className="px-5 py-3.5">
-                    <Stamp estado={c.estado} size="sm" />
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <button
-                      onClick={() => setExpandido(expandido === c.id ? null : c.id)}
-                      className="flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1 rounded-full"
-                      style={{ background: "#FBEAE8", color: "#C9483B" }}
+                    <span
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                      style={{
+                        color: c.estado === "suspendido" ? "#C9483B" : "#3F8F5F",
+                        background: c.estado === "suspendido" ? "#FBEAE8" : "#EAF4ED",
+                      }}
                     >
-                      <Phone size={11} /> Emergencia
-                    </button>
+                      {c.estado === "suspendido" ? "Suspendido" : "Activo"}
+                    </span>
                   </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button className="text-[12.5px] font-medium" style={{ color: "#2C5F7C" }}>
-                      Ver ficha
-                    </button>
+                  <td className="px-5 py-3.5 text-[12px]" style={{ color: "#9CA39A" }}>
+                    {fmtFecha(new Date(c.created_at))}
                   </td>
                 </tr>
-                {expandido === c.id && (
-                  <tr style={{ borderColor: "#F0F1EE" }}>
-                    <td colSpan={7} className="px-5 pb-4">
-                      <EmergenciaCard emergencia={c.emergencia} />
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
-
 function ATSView({ ats, setAts }) {
   const toggleRiesgo = (id) => {
     setAts((prev) => {
@@ -2998,7 +3002,7 @@ export default function App() {
         {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView session={session} /> : <DashboardView />)}
         {view === "empresas" && <EmpresasView accessToken={session?.accessToken} />}
         {view === "planes" && <PlanesView />}
-        {view === "contratistas" && <ContratistasView />}
+        {view === "contratistas" && <ContratistasView session={session} />}
         {view === "documentos" && <DocumentosView role={role} ats={ats} session={session} />}
         {view === "ats" && <ATSView ats={ats} setAts={setAts} />}
         {view === "vehiculos" && <VehiculosView />}
