@@ -77,7 +77,7 @@ const NAV_BY_ROLE = {
   contratista: [
     { id: "ats", label: "ATS", icon: AlertTriangle },
     { id: "documentos", label: "Mis documentos", icon: FileStack },
-    { id: "trabajadores", label: "Trabajadores", icon: Users },
+    { id: "nomina", label: "Nómina", icon: Users },
     { id: "vehiculos", label: "Vehículos", icon: Truck },
   ],
   guardia: [
@@ -1395,6 +1395,293 @@ function VehiculosView() {
   );
 }
 
+function NominaView({ session }) {
+  const [archivo, setArchivo] = useState(null);
+  const [leyendo, setLeyendo] = useState(false);
+  const [trabajadoresPreview, setTrabajadoresPreview] = useState([]);
+  const [errorLectura, setErrorLectura] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [guardadosCount, setGuardadosCount] = useState(0);
+  const [trabajadoresDB, setTrabajadoresDB] = useState([]);
+  const [cargandoDB, setCargandoDB] = useState(false);
+  const [refrescar, setRefrescar] = useState(0);
+  const [mostrarManual, setMostrarManual] = useState(false);
+  const [filaNueva, setFilaNueva] = useState({ nombre: "", dni: "", cuit: "", cargo: "" });
+
+  const contratistaId = session?.perfil?.contratista_id;
+  const modoReal = !!(session?.accessToken && contratistaId);
+
+  // traer trabajadores ya cargados en la base
+  React.useEffect(() => {
+    if (!modoReal) return;
+    setCargandoDB(true);
+    fetch(
+      `${SUPABASE_URL}/rest/v1/trabajadores?contratista_id=eq.${contratistaId}&select=id,nombre,dni,cuit,cargo&order=created_at.desc`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } }
+    )
+      .then((r) => r.json())
+      .then((d) => setTrabajadoresDB(Array.isArray(d) ? d : []))
+      .finally(() => setCargandoDB(false));
+  }, [modoReal, contratistaId, session?.accessToken, refrescar]);
+
+  // columnas que puede tener el Excel (variantes comunes)
+  const COLS_NOMBRE = ["nombre", "name", "apellido y nombre", "nombres", "apellido", "empleado", "trabajador"];
+  const COLS_DNI = ["dni", "documento", "nro. documento", "nro documento", "cedula", "cedula de identidad"];
+  const COLS_CUIT = ["cuit", "cuil", "nro. cuit", "nro cuit"];
+  const COLS_CARGO = ["cargo", "puesto", "funcion", "función", "rol", "categoria", "categoría", "ocupacion"];
+
+  const matchCol = (header, opciones) =>
+    opciones.some((op) => header.toLowerCase().trim().includes(op));
+
+  const leerExcel = (file) => {
+    setErrorLectura("");
+    setLeyendo(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const XLSX = window.XLSX;
+        if (!XLSX) throw new Error("Librería de lectura no disponible. Recargá la página.");
+        const wb = XLSX.read(e.target.result, { type: "binary" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        if (data.length < 2) throw new Error("El archivo está vacío o no tiene filas de datos.");
+
+        const headers = data[0].map((h) => String(h || ""));
+        const idxNombre = headers.findIndex((h) => matchCol(h, COLS_NOMBRE));
+        const idxDni = headers.findIndex((h) => matchCol(h, COLS_DNI));
+        const idxCuit = headers.findIndex((h) => matchCol(h, COLS_CUIT));
+        const idxCargo = headers.findIndex((h) => matchCol(h, COLS_CARGO));
+
+        if (idxNombre === -1 && idxDni === -1) {
+          throw new Error("No se encontraron columnas reconocibles. Asegurate de tener columnas con nombres como 'Nombre', 'DNI', 'CUIT', 'Cargo'.");
+        }
+
+        const rows = data.slice(1).filter((r) => r.some((c) => c !== "" && c !== null && c !== undefined));
+        const parsed = rows.map((r) => ({
+          nombre: idxNombre >= 0 ? String(r[idxNombre] || "").trim() : "",
+          dni: idxDni >= 0 ? String(r[idxDni] || "").trim() : "",
+          cuit: idxCuit >= 0 ? String(r[idxCuit] || "").trim() : "",
+          cargo: idxCargo >= 0 ? String(r[idxCargo] || "").trim() : "",
+        })).filter((r) => r.nombre || r.dni);
+
+        setTrabajadoresPreview(parsed);
+        if (parsed.length === 0) throw new Error("No se encontraron trabajadores válidos en el archivo.");
+      } catch (err) {
+        setErrorLectura(err.message || "Error al leer el archivo.");
+        setTrabajadoresPreview([]);
+      } finally {
+        setLeyendo(false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleArchivo = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setArchivo(file);
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (["xlsx", "xls", "csv"].includes(ext)) {
+      leerExcel(file);
+    } else {
+      setErrorLectura("Formato PDF/Word detectado. Revisá los datos abajo y completá manualmente, o exportá tu listado a Excel para lectura automática.");
+      setTrabajadoresPreview([]);
+      setMostrarManual(true);
+    }
+  };
+
+  const updateRow = (i, field, val) => {
+    setTrabajadoresPreview((prev) => prev.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+  };
+
+  const deleteRow = (i) => setTrabajadoresPreview((prev) => prev.filter((_, idx) => idx !== i));
+
+  const agregarFila = () => {
+    if (!filaNueva.nombre && !filaNueva.dni) return;
+    setTrabajadoresPreview((prev) => [...prev, { ...filaNueva }]);
+    setFilaNueva({ nombre: "", dni: "", cuit: "", cargo: "" });
+  };
+
+  const guardarEnBase = async () => {
+    if (!modoReal) { setErrorLectura("Necesitás estar logueado como contratista."); return; }
+    if (trabajadoresPreview.length === 0) { setErrorLectura("No hay trabajadores para guardar."); return; }
+    setGuardando(true);
+    setErrorLectura("");
+    let count = 0;
+    for (const t of trabajadoresPreview) {
+      if (!t.nombre) continue;
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/trabajadores`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.accessToken}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ nombre: t.nombre, dni: t.dni || null, cuit: t.cuit || null, cargo: t.cargo || null, contratista_id: contratistaId }),
+      });
+      if (res.ok) count++;
+    }
+    setGuardadosCount(count);
+    setTrabajadoresPreview([]);
+    setArchivo(null);
+    setRefrescar((n) => n + 1);
+    setGuardando(false);
+  };
+
+  return (
+    <div className="px-8 pb-10">
+      {/* Zona de carga de archivo */}
+      <div className="rounded-xl border bg-white p-6 mb-6" style={{ borderColor: "#E2E5E1" }}>
+        <h3 className="text-[13.5px] font-semibold mb-1" style={{ color: "#14181C" }}>Subir nómina de personal</h3>
+        <p className="text-[12px] mb-4" style={{ color: "#9CA39A" }}>
+          Aceptamos <strong>Excel (.xlsx, .xls)</strong> o <strong>CSV</strong> — la app detecta automáticamente las columnas de Nombre, DNI, CUIT y Cargo. También podés cargar PDF o Word y completar los datos manualmente.
+        </p>
+        <input type="file" accept=".xlsx,.xls,.csv,.pdf,.doc,.docx" onChange={handleArchivo} className="text-[12.5px]" />
+        {leyendo && <p className="text-[12px] mt-2" style={{ color: "#9CA39A" }}>Leyendo archivo...</p>}
+        {errorLectura && (
+          <div className="mt-3 rounded-lg px-3.5 py-2.5 text-[12px]" style={{ background: "#FBF2E2", color: "#8A5A14" }}>
+            {errorLectura}
+          </div>
+        )}
+      </div>
+
+      {/* Preview / edición de trabajadores detectados */}
+      {trabajadoresPreview.length > 0 && (
+        <div className="rounded-xl border bg-white p-5 mb-6" style={{ borderColor: "#E2E5E1" }}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-[13.5px] font-semibold" style={{ color: "#14181C" }}>
+                {trabajadoresPreview.length} trabajadores detectados — revisá y editá antes de guardar
+              </h3>
+              <p className="text-[11.5px]" style={{ color: "#9CA39A" }}>Podés editar cualquier celda, borrar filas o agregar manualmente</p>
+            </div>
+            <button
+              onClick={guardarEnBase}
+              disabled={guardando}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
+              style={{ background: "#2C5F7C", color: "#fff", opacity: guardando ? 0.7 : 1 }}
+            >
+              {guardando ? "Guardando..." : `Guardar ${trabajadoresPreview.length} en la base`}
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[12.5px]">
+              <thead>
+                <tr style={{ background: "#F7F8F6" }}>
+                  {["Nombre completo", "DNI", "CUIT", "Cargo / Puesto", ""].map((h) => (
+                    <th key={h} className="px-3 py-2.5 font-semibold uppercase text-[11px] tracking-wide" style={{ color: "#9CA39A" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trabajadoresPreview.map((t, i) => (
+                  <tr key={i} className="border-t" style={{ borderColor: "#F0F1EE" }}>
+                    {["nombre", "dni", "cuit", "cargo"].map((field) => (
+                      <td key={field} className="px-2 py-1.5">
+                        <input
+                          value={t[field]}
+                          onChange={(e) => updateRow(i, field, e.target.value)}
+                          className="rounded border px-2 py-1 w-full text-[12.5px] outline-none"
+                          style={{ borderColor: "#E2E5E1" }}
+                          placeholder={field === "nombre" ? "Requerido" : "Opcional"}
+                        />
+                      </td>
+                    ))}
+                    <td className="px-2 py-1.5">
+                      <button onClick={() => deleteRow(i)} className="text-[11px] font-medium" style={{ color: "#C9483B" }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+                {/* Fila para agregar manualmente */}
+                <tr className="border-t" style={{ borderColor: "#E2E5E1", background: "#FAFAFA" }}>
+                  {["nombre", "dni", "cuit", "cargo"].map((field) => (
+                    <td key={field} className="px-2 py-1.5">
+                      <input
+                        value={filaNueva[field]}
+                        onChange={(e) => setFilaNueva((prev) => ({ ...prev, [field]: e.target.value }))}
+                        placeholder={`+ ${field}`}
+                        className="rounded border px-2 py-1 w-full text-[12.5px] outline-none"
+                        style={{ borderColor: "#E2E5E1" }}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-2 py-1.5">
+                    <button onClick={agregarFila} className="text-[11px] font-medium" style={{ color: "#2C5F7C" }}>+ Agregar</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Entrada manual cuando no hay preview */}
+      {trabajadoresPreview.length === 0 && mostrarManual && (
+        <div className="rounded-xl border bg-white p-5 mb-6" style={{ borderColor: "#E2E5E1" }}>
+          <h3 className="text-[13.5px] font-semibold mb-3" style={{ color: "#14181C" }}>Carga manual</h3>
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            {["nombre", "dni", "cuit", "cargo"].map((field) => (
+              <input
+                key={field}
+                value={filaNueva[field]}
+                onChange={(e) => setFilaNueva((prev) => ({ ...prev, [field]: e.target.value }))}
+                placeholder={{ nombre: "Nombre completo", dni: "DNI", cuit: "CUIT", cargo: "Cargo" }[field]}
+                className="rounded-lg border px-3 py-2 text-[12.5px] outline-none"
+                style={{ borderColor: "#E2E5E1" }}
+              />
+            ))}
+          </div>
+          <button onClick={agregarFila} className="px-3.5 py-2 rounded-lg text-[12.5px] font-medium" style={{ background: "#2C5F7C", color: "#fff" }}>
+            + Agregar a la lista
+          </button>
+        </div>
+      )}
+
+      {guardadosCount > 0 && (
+        <div className="rounded-lg px-4 py-3 mb-5 text-[12.5px] font-medium" style={{ background: "#EAF4ED", color: "#3F8F5F" }}>
+          ✓ {guardadosCount} trabajadores guardados correctamente en la base.
+        </div>
+      )}
+
+      {/* Lista de trabajadores ya en la base */}
+      <div>
+        <h3 className="text-[13.5px] font-semibold mb-3" style={{ color: "#14181C" }}>
+          Tu nómina actual ({trabajadoresDB.length} trabajadores)
+        </h3>
+        {cargandoDB && <p className="text-[12px]" style={{ color: "#9CA39A" }}>Cargando...</p>}
+        {!cargandoDB && trabajadoresDB.length === 0 && (
+          <p className="text-[12.5px]" style={{ color: "#9CA39A" }}>Todavía no cargaste ningún trabajador.</p>
+        )}
+        {trabajadoresDB.length > 0 && (
+          <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
+            <table className="w-full text-left">
+              <thead>
+                <tr style={{ background: "#F7F8F6" }}>
+                  {["Nombre", "DNI", "CUIT", "Cargo"].map((h) => (
+                    <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trabajadoresDB.map((t) => (
+                  <tr key={t.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
+                    <td className="px-5 py-3 text-[13px] font-medium" style={{ color: "#14181C" }}>{t.nombre}</td>
+                    <td className="px-5 py-3 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{t.dni || "—"}</td>
+                    <td className="px-5 py-3 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{t.cuit || "—"}</td>
+                    <td className="px-5 py-3 text-[12.5px]" style={{ color: "#4B524A" }}>{t.cargo || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TrabajadoresView({ role, session }) {
   const [seleccionado, setSeleccionado] = useState(null);
   const [busqueda, setBusqueda] = useState("");
@@ -2642,438 +2929,3 @@ function AccessPortal({ onEnter }) {
             )}
 
             {selected === "contratista" && mode === "registro" && (
-              <>
-                <FieldInput icon={KeyRound} label="Código de tu empresa contratante" value={codigo} onChange={setCodigo} placeholder="EMP-7K2X9" mono />
-                <FieldInput icon={Building2} label="CUIT de tu empresa" value={cuit} onChange={setCuit} placeholder="30-71234567-8" mono />
-                <FieldInput icon={FileText} label="Razón Social" value={razonSocial} onChange={setRazonSocial} placeholder="Mi Empresa SRL" />
-                <FieldInput icon={UserCog} label="Email de acceso" value={email} onChange={setEmail} placeholder="contacto@miempresa.com" />
-                <FieldInput icon={Lock} label="Crear contraseña" type="password" value={password} onChange={setPassword} placeholder="••••••••" />
-                <p className="text-[11.5px] -mt-1" style={{ color: "#9CA39A" }}>
-                  El código te lo brinda la empresa para la que vas a trabajar. Sin código válido no podés registrarte.
-                </p>
-              </>
-            )}
-
-            {error && (
-              <div className="rounded-lg px-3.5 py-2.5 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
-                {error}
-              </div>
-            )}
-
-            <button
-              onClick={handleIngresar}
-              disabled={cargando}
-              className="rounded-lg py-2.5 text-[13px] font-semibold text-white mt-1"
-              style={{ background: type.accent, opacity: cargando ? 0.7 : 1 }}
-            >
-              {cargando
-                ? "Verificando..."
-                : selected === "contratista" && mode === "registro"
-                ? "Crear cuenta y vincularme"
-                : "Ingresar"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-
-async function crearEmpresaReal({ accessToken, razonSocial, cuit, rubro, email, password }) {
-  // 1. crear el usuario de login para esta empresa
-  const signupRes = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-    method: "POST",
-    headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const signupData = await signupRes.json();
-  if (!signupRes.ok) throw new Error(signupData.error_description || signupData.msg || "No se pudo crear el usuario de la empresa.");
-  const userId = signupData.user?.id || signupData.id;
-  if (!userId) throw new Error("No se pudo obtener el ID del usuario creado.");
-
-  const codigo = "EMP-" + Math.random().toString(36).slice(2, 7).toUpperCase();
-
-  // 2. crear la fila de la empresa cliente
-  const empresaRes = await fetch(`${SUPABASE_URL}/rest/v1/empresas_cliente`, {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-    },
-    body: JSON.stringify({ razon_social: razonSocial, cuit, codigo_vinculacion: codigo, rubro: rubro || null, email }),
-  });
-  const empresaData = await empresaRes.json();
-  if (!empresaRes.ok) throw new Error(empresaData.message || "No se pudo crear la empresa en la base de datos.");
-  const empresaId = empresaData[0].id;
-
-  // 3. vincular el usuario a la empresa con un perfil de rol "empresa"
-  const perfilRes = await fetch(`${SUPABASE_URL}/rest/v1/perfiles`, {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ id: userId, rol: "empresa", nombre: razonSocial, empresa_cliente_id: empresaId }),
-  });
-  if (!perfilRes.ok) {
-    const perfilErr = await perfilRes.json();
-    throw new Error(perfilErr.message || "La empresa se creó, pero no se pudo vincular el perfil de usuario.");
-  }
-
-  return { codigo };
-}
-
-function EmpresasView({ accessToken }) {
-  const [items] = useState(EMPRESAS_CLIENTE);
-  const [showNew, setShowNew] = useState(false);
-  const [razonSocial, setRazonSocial] = useState("");
-  const [cuit, setCuit] = useState("");
-  const [rubro, setRubro] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [generated, setGenerated] = useState(null);
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState("");
-
-  const crearCodigo = async () => {
-    setError("");
-    if (!accessToken) {
-      setError("Esta acción necesita tu sesión real de Super Admin. Volvé a iniciar sesión.");
-      return;
-    }
-    if (!razonSocial || !cuit || !email || !password) {
-      setError("Completá Razón Social, CUIT, email y contraseña antes de crear la empresa.");
-      return;
-    }
-    setCargando(true);
-    try {
-      const { codigo } = await crearEmpresaReal({ accessToken, razonSocial, cuit, rubro, email, password });
-      setGenerated(codigo);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setCargando(false);
-    }
-  };
-
-  return (
-    <div className="px-8 pb-10">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-[12.5px]" style={{ color: "#9CA39A" }}>
-          {items.length} empresas dadas de alta en la plataforma
-        </p>
-        <button
-          onClick={() => { setShowNew((s) => !s); setGenerated(null); }}
-          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium"
-          style={{ background: "#2C5F7C", color: "#fff" }}
-        >
-          <Plus size={15} /> Nueva empresa cliente
-        </button>
-      </div>
-
-      {showNew && (
-        <div className="rounded-xl border bg-white p-5 mb-5" style={{ borderColor: "#E2E5E1" }}>
-          <h3 className="text-[13.5px] font-semibold mb-4" style={{ color: "#14181C" }}>
-            Dar de alta nueva empresa
-          </h3>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <FieldInput icon={FileText} label="Razón Social" value={razonSocial} onChange={setRazonSocial} placeholder="Minera del Sur S.A." />
-            <FieldInput icon={Building2} label="CUIT" value={cuit} onChange={setCuit} placeholder="30-71234567-8" mono />
-            <FieldInput icon={Briefcase} label="Rubro" value={rubro} onChange={setRubro} placeholder="Minería" />
-            <FieldInput icon={UserCog} label="Email de acceso" value={email} onChange={setEmail} placeholder="contacto@minerasur.com" />
-            <FieldInput icon={Lock} label="Contraseña de acceso" type="password" value={password} onChange={setPassword} placeholder="••••••••" />
-          </div>
-
-          {error && (
-            <div className="mb-3 rounded-lg px-3.5 py-2.5 text-[12px]" style={{ background: "#FBEAE8", color: "#C9483B" }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            onClick={crearCodigo}
-            disabled={cargando}
-            className="px-3.5 py-2 rounded-lg text-[13px] font-medium"
-            style={{ background: "#14181C", color: "#fff", opacity: cargando ? 0.7 : 1 }}
-          >
-            {cargando ? "Creando empresa..." : "Crear empresa y generar código"}
-          </button>
-
-          {generated && (
-            <div
-              className="mt-4 rounded-lg p-4 flex items-center justify-between"
-              style={{ background: "#EAF4ED", border: "1px solid #BFE0CB" }}
-            >
-              <div>
-                <div className="text-[11px] font-medium" style={{ color: "#3F8F5F" }}>
-                  ✓ Empresa y usuario creados en la base real. Código único — compartilo con sus contratistas
-                </div>
-                <div
-                  className="text-[18px] font-semibold mt-1"
-                  style={{ fontFamily: "'JetBrains Mono', monospace", color: "#2C5F7C", letterSpacing: "0.05em" }}
-                >
-                  {generated}
-                </div>
-              </div>
-              <Copy size={16} color="#9CA39A" />
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
-        <table className="w-full text-left">
-          <thead>
-            <tr style={{ background: "#F7F8F6" }}>
-              {["Código", "Razón Social", "CUIT", "Rubro", "Contratistas", "Plan", "Estado"].map((h) => (
-                <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((e) => (
-              <tr key={e.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
-                <td className="px-5 py-3.5 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#2C5F7C", fontWeight: 600 }}>
-                  {e.id}
-                </td>
-                <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razonSocial}</td>
-                <td className="px-5 py-3.5 text-[12.5px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{e.cuit}</td>
-                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.rubro}</td>
-                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.contratistas}</td>
-                <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{e.plan}</td>
-                <td className="px-5 py-3.5">
-                  <span
-                    className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                    style={{ color: STATUS_EMPRESA[e.estado].color, background: STATUS_EMPRESA[e.estado].bg }}
-                  >
-                    {STATUS_EMPRESA[e.estado].label}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function PlanesView({ session }) {
-  const [ciclo, setCiclo] = useState("mensual");
-  const [empresas, setEmpresas] = useState([]);
-  const [conteoMap, setConteoMap] = useState({}); // { empresa_id: cantidad_contratistas }
-  const [cargando, setCargando] = useState(false);
-
-  React.useEffect(() => {
-    if (!session?.accessToken) return;
-    setCargando(true);
-    obtenerEmpresasCliente({ accessToken: session.accessToken })
-      .then(async (emps) => {
-        setEmpresas(emps);
-        // para cada empresa, contamos sus contratistas
-        const conteos = await Promise.all(
-          emps.map(async (e) => {
-            const res = await fetch(
-              `${SUPABASE_URL}/rest/v1/contratistas?empresa_cliente_id=eq.${e.id}&select=id`,
-              { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } }
-            );
-            const data = await res.json();
-            return { id: e.id, count: Array.isArray(data) ? data.length : 0 };
-          })
-        );
-        const map = {};
-        conteos.forEach((c) => { map[c.id] = c.count; });
-        setConteoMap(map);
-      })
-      .finally(() => setCargando(false));
-  }, [session?.accessToken]);
-
-  const facturacionTotal = empresas.reduce((acc, e) => {
-    const n = conteoMap[e.id] || 0;
-    const plan = planPorContratistas(n);
-    const { total } = precioPorCiclo(plan.mensual, ciclo);
-    return acc + total;
-  }, 0);
-
-  return (
-    <div className="px-8 pb-10">
-      <div
-        className="rounded-xl border p-4 mb-6 flex items-start gap-3"
-        style={{ borderColor: "#E2E5E1", background: "#EAF1F4" }}
-      >
-        <TrendingUp size={16} color="#2C5F7C" className="mt-0.5 shrink-0" />
-        <p className="text-[12.5px]" style={{ color: "#1F4358" }}>
-          El plan de cada empresa se asigna automáticamente según su cantidad de contratistas activos.
-          Los precios son en <strong>USD</strong> y se actualizan en cuanto definás los valores finales.
-        </p>
-      </div>
-
-      <div className="flex items-center justify-between mb-5">
-        <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
-          Escala de precios (USD) — valores provisorios
-        </h3>
-        <div className="flex gap-1 p-1 rounded-lg" style={{ background: "#F7F8F6", border: "1px solid #E2E5E1" }}>
-          {[
-            { id: "mensual", label: "Mensual" },
-            { id: "semestral", label: "Semestral" },
-            { id: "anual", label: "Anual" },
-          ].map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setCiclo(c.id)}
-              className="px-3.5 py-1.5 rounded-md text-[12.5px] font-medium"
-              style={{
-                background: ciclo === c.id ? "#fff" : "transparent",
-                color: ciclo === c.id ? "#14181C" : "#9CA39A",
-                boxShadow: ciclo === c.id ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        {PLANES.map((p) => {
-          const { total, label } = precioPorCiclo(p.mensual, ciclo);
-          return (
-            <div key={p.id} className="rounded-xl border bg-white p-5" style={{ borderColor: "#E2E5E1" }}>
-              <div className="text-[12px] font-medium mb-3" style={{ color: "#9CA39A" }}>
-                {p.min}–{p.max === Infinity ? "∞" : p.max} contratistas
-              </div>
-              <div className="text-[15px] font-semibold mb-1" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#14181C" }}>
-                {p.nombre}
-              </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-semibold" style={{ fontFamily: "'Space Grotesk', sans-serif", color: "#2C5F7C" }}>
-                  ${total}
-                </span>
-                <span className="text-[11.5px]" style={{ color: "#9CA39A" }}>{label}</span>
-              </div>
-              {ciclo !== "mensual" && (
-                <div className="text-[11px] mt-1" style={{ color: "#9CA39A" }}>Descuento a definir</div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[14px] font-semibold" style={{ color: "#14181C" }}>
-          Plan actual por empresa
-        </h3>
-        {empresas.length > 0 && (
-          <div className="text-[12.5px] font-medium" style={{ color: "#2C5F7C" }}>
-            Facturación {ciclo} estimada: <strong>${facturacionTotal} USD</strong>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: "#E2E5E1" }}>
-        <table className="w-full text-left">
-          <thead>
-            <tr style={{ background: "#F7F8F6" }}>
-              {["Empresa", "CUIT", "Contratistas", "Plan asignado", `Costo (${ciclo})`].map((h) => (
-                <th key={h} className="px-5 py-3 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9CA39A" }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {cargando && (
-              <tr>
-                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
-                  Cargando empresas...
-                </td>
-              </tr>
-            )}
-            {!cargando && empresas.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-5 py-4 text-[12.5px] text-center" style={{ color: "#9CA39A" }}>
-                  Todavía no hay empresas clientes registradas.
-                </td>
-              </tr>
-            )}
-            {empresas.map((e) => {
-              const n = conteoMap[e.id] || 0;
-              const plan = planPorContratistas(n);
-              const { total } = precioPorCiclo(plan.mensual, ciclo);
-              return (
-                <tr key={e.id} className="border-t" style={{ borderColor: "#F0F1EE" }}>
-                  <td className="px-5 py-3.5 text-[13px] font-medium" style={{ color: "#14181C" }}>{e.razon_social}</td>
-                  <td className="px-5 py-3.5 text-[12px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#6B7268" }}>{e.cuit}</td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ color: "#4B524A" }}>{n}</td>
-                  <td className="px-5 py-3.5 text-[13px] font-semibold" style={{ color: "#2C5F7C" }}>{plan.nombre}</td>
-                  <td className="px-5 py-3.5 text-[13px]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#14181C" }}>${total}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-const TITLES = {
-  dashboard: { title: "Dashboard ejecutivo", subtitle: "Resumen general de cumplimiento documental" },
-  empresas: { title: "Empresas clientes", subtitle: "Altas, códigos de vinculación y estado de cuenta" },
-  planes: { title: "Planes y facturación", subtitle: "Escala de precios por cantidad de contratistas" },
-  contratistas: { title: "Contratistas", subtitle: "Empresas habilitadas y su estado de documentación" },
-  documentos: { title: "Documentos", subtitle: "Carga, vencimientos y estado por documento" },
-  ats: { title: "ATS — Análisis Preliminar de Tareas", subtitle: "Definí el tipo de contratista y los riesgos de tu tarea" },
-  vehiculos: { title: "Vehículos", subtitle: "Documentación de vehículos comunes e industriales" },
-  trabajadores: { title: "Trabajadores", subtitle: "Estado documental individual — quién está habilitado a ingresar" },
-  reportes: { title: "Reportes", subtitle: "Exportables para auditorías y seguimiento" },
-  aprobaciones: { title: "Aprobaciones pendientes", subtitle: "Documentación cargada esperando revisión" },
-  accesos: { title: "Control de acceso", subtitle: "Verificación de habilitación en portería" },
-};
-
-export default function App() {
-  const [role, setRole] = useState(null);
-  const [view, setView] = useState("dashboard");
-  const [ats, setAts] = useState({ tipo: "empresa", riesgos: [] });
-  const [session, setSession] = useState(null); // { accessToken, perfil } — solo se llena en login real
-
-  const selectRole = (r, sessionData) => {
-    setRole(r);
-    setSession(sessionData || null);
-    setView(NAV_BY_ROLE[r][0].id);
-  };
-
-  if (!role) return <AccessPortal onEnter={selectRole} />;
-
-  const meta = TITLES[view];
-
-  return (
-    <div
-      className="flex min-h-[640px]"
-      style={{ background: "#F7F8F6", fontFamily: "'Inter', sans-serif" }}
-    >
-      <Sidebar role={role} setRole={setRole} view={view} setView={setView} onLogout={() => { setRole(null); setSession(null); }} />
-      <main className="flex-1 overflow-auto">
-        <Topbar title={meta?.title} subtitle={meta?.subtitle} />
-        {view === "dashboard" && (role === "super_admin" ? <SuperAdminDashboardView session={session} /> : <DashboardView />)}
-        {view === "empresas" && <EmpresasView accessToken={session?.accessToken} />}
-        {view === "planes" && <PlanesView session={session} />}
-        {view === "contratistas" && <ContratistasView session={session} />}
-        {view === "documentos" && <DocumentosView role={role} ats={ats} session={session} />}
-        {view === "ats" && <ATSView ats={ats} setAts={setAts} />}
-        {view === "vehiculos" && <VehiculosView />}
-        {view === "trabajadores" && <TrabajadoresView role={role} session={session} />}
-        {view === "reportes" && <ReportesView />}
-        {view === "aprobaciones" && <AprobacionesView session={session} />}
-        {view === "accesos" && <AccesosView />}
-      </main>
-    </div>
-  );
-}
